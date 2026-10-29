@@ -16,6 +16,85 @@ use tauri::{AppHandle, Manager, RunEvent};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSColor, NSWindow, NSWindowCollectionBehavior, NSScreenSaverWindowLevel};
 
+#[cfg(target_os = "macos")]
+const CAMERA_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera";
+
+#[cfg(target_os = "macos")]
+fn macos_camera_status() -> &'static str {
+    use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeVideo};
+
+    let Some(media) = (unsafe { AVMediaTypeVideo }) else {
+        return "unknown";
+    };
+    let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media) };
+    if status == AVAuthorizationStatus::NotDetermined {
+        "not_determined"
+    } else if status == AVAuthorizationStatus::Restricted {
+        "restricted"
+    } else if status == AVAuthorizationStatus::Denied {
+        "denied"
+    } else if status == AVAuthorizationStatus::Authorized {
+        "authorized"
+    } else {
+        "unknown"
+    }
+}
+
+#[tauri::command]
+fn camera_permission_status() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        macos_camera_status().to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "unknown".to_string()
+    }
+}
+
+#[tauri::command]
+async fn request_camera_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use block2::RcBlock;
+        use objc2::runtime::Bool;
+        use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeVideo};
+
+        let Some(media) = (unsafe { AVMediaTypeVideo }) else {
+            return false;
+        };
+        let rx = {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let tx = Mutex::new(Some(tx));
+            let handler = RcBlock::new(move |granted: Bool| {
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(granted.as_bool());
+                }
+            });
+            unsafe {
+                AVCaptureDevice::requestAccessForMediaType_completionHandler(media, &handler);
+            }
+            // AVFoundation 会复制 completion block，本地这份可以释放
+            drop(handler);
+            rx
+        };
+        rx.await.unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+fn open_camera_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(CAMERA_SETTINGS_URL).spawn();
+    }
+}
+
 #[cfg(unix)]
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -549,6 +628,11 @@ pub fn run() {
     install_signal_handlers();
 
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            camera_permission_status,
+            request_camera_permission,
+            open_camera_settings
+        ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();

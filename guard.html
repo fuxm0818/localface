@@ -989,7 +989,7 @@ body.test {
       return true;
     } catch (e) {
       CAM.state = 'error';
-      CAM.error = e?.name === 'NotAllowedError' ? '摄像头权限未开启' : (e?.message || '打不开摄像头');
+      CAM.error = e?.name === 'NotAllowedError' ? '摄像头权限未开启：请在系统设置 → 隐私与安全性 → 摄像头里打开 LocalFace' : (e?.message || '打不开摄像头');
       return false;
     }
   }

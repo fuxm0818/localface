@@ -399,7 +399,7 @@ async function handle(req, res) {
     const file = pathname === '/' ? 'index.html'
       : pathname === '/admin' ? 'admin.html'
       : pathname === '/guard' ? 'guard.html'
-      : ['/index.html', '/admin.html', '/style.css', '/guard.html'].includes(pathname) ? pathname.slice(1)
+      : ['/index.html', '/admin.html', '/style.css', '/guard.html', '/permission-ui.js'].includes(pathname) ? pathname.slice(1)
       : null;
     if (file) {
       try {

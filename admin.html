@@ -217,6 +217,7 @@
   </div>
 </dialog>
 
+<script src="/permission-ui.js"></script>
 <script type="module">
 const $ = id => document.getElementById(id);
 
@@ -721,6 +722,20 @@ function releaseAdminCamera() {
 
 async function openCamera() {
   if (stream) return true;
+  const perm = await CameraPermission.status();
+  if (perm === 'denied' || perm === 'restricted') {
+    log(`摄像头权限${CameraPermission.label(perm)}，请在系统设置里打开`, 'bad');
+    CameraPermission.explain(perm, () => openCamera());
+    return false;
+  }
+  if (perm === 'not_determined') {
+    const granted = await CameraPermission.request();
+    if (granted === false) {
+      log('摄像头权限已拒绝，已弹出开启指引', 'bad');
+      CameraPermission.explain('denied', () => openCamera());
+      return false;
+    }
+  }
   try {
     const deviceId = camDevice.value;
     stream = await navigator.mediaDevices.getUserMedia({
@@ -735,7 +750,13 @@ async function openCamera() {
     log('摄像头已开启', 'ok');
     return true;
   } catch (e) {
-    log('打不开摄像头：' + e.message + '（请允许浏览器权限，或关掉占用摄像头的软件）', 'bad');
+    if (e?.name === 'NotAllowedError') {
+      const state = (await CameraPermission.status()) || 'denied';
+      log(`摄像头权限${CameraPermission.label(state)}，已弹出开启指引`, 'bad');
+      CameraPermission.explain(state, () => openCamera());
+    } else {
+      log('打不开摄像头：' + e.message + '（可能被其他软件占用）', 'bad');
+    }
     return false;
   } finally {
     refreshControls();

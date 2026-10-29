@@ -1,6 +1,6 @@
 [package]
 name = "localface"
-version = "1.0.1"
+version = "1.0.2"
 description = "LocalFace：本地多人物人脸识别桌面应用，画面不出本机"
 license = "MIT"
 repository = "https://github.com/fuxm0818/localface"
@@ -24,7 +24,11 @@ serde_json = "1"
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSColor", "NSResponder", "NSWindow"] }
+objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
+tokio = { version = "1", features = ["sync"] }
 
 [profile.release]
 codegen-units = 1

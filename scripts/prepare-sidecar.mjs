@@ -59,7 +59,7 @@ for (const dir of await readdir(platformDir)) {
   if (dir !== process.arch) await rm(join(platformDir, dir), { recursive: true, force: true });
 }
 
-for (const file of ['index.html', 'admin.html', 'guard.html', 'style.css']) await cp(join(ROOT, file), join(STATIC, file));
+for (const file of ['index.html', 'admin.html', 'guard.html', 'style.css', 'permission-ui.js']) await cp(join(ROOT, file), join(STATIC, file));
 for (const file of ['arcface_r50.onnx', 'scrfd_500m.onnx']) await copy(join(ROOT, 'models', file), join(MODELS, file));
 
 console.log(`服务代码 → ${SERVER}`);

@@ -73,7 +73,7 @@
 | Node.js | **22.13 或更高**（推荐 24 LTS） | 用的是 Node 自带的 SQLite（`node:sqlite`），不需要另外安装数据库 |
 | 浏览器 | Chrome 或 Edge（推荐）；Safari 新版本理论可用但没测 | 必须用 `http://localhost` 打开，不能直接双击 `index.html` |
 | 磁盘 | 约 480 MB | 依赖 293 MB + 模型 169 MB；人脸数据每张约 15 KB |
-| 摄像头 | 笔记本自带或 USB 摄像头 | 第一次使用要在浏览器弹窗里点「允许」 |
+| 摄像头 | 笔记本自带或 USB 摄像头 | 第一次使用系统会问是否允许访问，点「允许」；桌面版误点拒绝后，页面里会给出「打开系统设置」按钮 |
 | 网络 | 只在 `npm install` 时需要 | 装好之后完全离线可跑 |
 | Python | 不需要 | 所有推理都在 Node 里跑 |
 | GPU | 不需要 | CPU 即可，单张脸单帧约 110～160 ms |
@@ -504,12 +504,14 @@ $env:DATA_DIR="D:\face-data"; npm start
 
 **Q：点「开启摄像头」提示打不开 / 权限错误**
 
-1. 确认地址栏是 `http://localhost:5273`（`127.0.0.1:5273` 也可以），不要用 `file://` 打开；
-2. 点地址栏左边的锁形/摄像头图标，把「摄像头」设为允许，然后刷新；
-3. macOS：系统设置 → 隐私与安全 → 摄像头，确认 Chrome / Edge 被允许；
-4. 关掉正在占用摄像头的软件（Zoom、腾讯会议、微信视频、Photo Booth）；
-5. 识别页和后台不要同时开摄像头；先在一个页面点「停止」/「关闭」；
-6. 有多个摄像头时，在下拉框里换一个再试。
+1. 桌面版（LocalFace.app）：第一次点「开启摄像头」时，macOS 会弹出「“LocalFace”想访问相机」，点「允许」；
+2. 如果之前误点过「不允许」：页面里会直接弹出说明，点「打开系统设置」，在 **隐私与安全性 → 摄像头** 里把 **LocalFace** 打开，再回来点「重试」；
+3. 浏览器版：确认地址栏是 `http://localhost:5273`（`127.0.0.1:5273` 也可以），不要用 `file://` 打开；
+4. 浏览器版：点地址栏左边的锁形/摄像头图标，把「摄像头」设为允许，然后刷新；
+5. 浏览器版：macOS 系统设置 → 隐私与安全 → 摄像头，确认 Chrome / Edge 被允许；
+6. 关掉正在占用摄像头的软件（Zoom、腾讯会议、微信视频、Photo Booth）；
+7. 识别页和后台不要同时开摄像头；先在一个页面点「停止」/「关闭」；
+8. 有多个摄像头时，在下拉框里换一个再试。
 
 **Q：`npm start` 报端口被占用（EADDRINUSE）**
 
@@ -709,7 +711,7 @@ Rust 写的 Tauri 2 壳只负责进程生命周期和窗口，识别、数据库
 需要：macOS + Xcode Command Line Tools（`xcode-select --install`）+ Rust（`rustup`）。
 仓库里的 `src-tauri/.cargo/config.toml` 配了 [rsproxy](https://rsproxy.cn) 镜像加速 crates 下载；在海外网络可以删掉这个文件，改用官方源。
 
-**不想自己装环境？** 仓库配了 GitHub Actions（`.github/workflows/build.yml`）：每次 push 到 main 会自动在云端打包 Apple Silicon 版 `.app` / `.dmg`，在仓库的 [Actions](https://github.com/fuxm0818/localface/actions) 页面点进最新一次运行，Artifacts 里下载即可；打 `v*` 标签（`git tag v1.0.1 && git push --tags`）还会自动发布到 Releases。云端产物使用 ad-hoc 签名（没有 Apple 付费开发者签名），首次打开会被 Gatekeeper 拦一次，按下面的步骤放行即可。
+**不想自己装环境？** 仓库配了 GitHub Actions（`.github/workflows/build.yml`）：每次 push 到 main 会自动在云端打包 Apple Silicon 版 `.app` / `.dmg`，在仓库的 [Actions](https://github.com/fuxm0818/localface/actions) 页面点进最新一次运行，Artifacts 里下载即可；打 `v*` 标签（`git tag v1.0.2 && git push --tags`）还会自动发布到 Releases。云端产物使用 ad-hoc 签名（没有 Apple 付费开发者签名），首次打开会被 Gatekeeper 拦一次，按下面的步骤放行即可。
 
 ### 从 Releases 下载安装
 
@@ -733,7 +735,7 @@ npm run desktop:build     # 首次编译 Rust，约 3～10 分钟
 
 ```
 src-tauri/target/release/bundle/macos/LocalFace.app              ~371 MB
-src-tauri/target/release/bundle/dmg/LocalFace_1.0.1_aarch64.dmg  ~218 MB
+src-tauri/target/release/bundle/dmg/LocalFace_1.0.2_aarch64.dmg  ~218 MB
 ```
 
 双击 `.app` 即可使用，不需要终端，也不需要在目标机器上安装 Node。

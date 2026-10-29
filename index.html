@@ -60,6 +60,7 @@
   <div class="footer-note">人脸模型来自 InsightFace（SCRFD + ArcFace），仅供个人非商业使用。</div>
 </main>
 
+<script src="/permission-ui.js"></script>
 <script type="module">
 const $ = id => document.getElementById(id);
 const video = $('video');
@@ -341,6 +342,20 @@ async function loop() {
 }
 
 $('start').onclick = async () => {
+  const perm = await CameraPermission.status();
+  if (perm === 'denied' || perm === 'restricted') {
+    stat.textContent = `摄像头权限${CameraPermission.label(perm)}，请在系统设置里打开 LocalFace`;
+    CameraPermission.explain(perm, () => $('start').click());
+    return;
+  }
+  if (perm === 'not_determined') {
+    const granted = await CameraPermission.request();
+    if (granted === false) {
+      stat.textContent = '摄像头权限已拒绝，请在系统设置里打开 LocalFace';
+      CameraPermission.explain('denied', () => $('start').click());
+      return;
+    }
+  }
   try {
     const deviceId = $('device').value;
     stream = await navigator.mediaDevices.getUserMedia({
@@ -364,7 +379,13 @@ $('start').onclick = async () => {
     await loadState().catch(() => {});
     loop();
   } catch (e) {
-    stat.textContent = '打不开摄像头：' + e.message + '（请允许浏览器摄像头权限）';
+    if (e?.name === 'NotAllowedError') {
+      const state = (await CameraPermission.status()) || 'denied';
+      stat.textContent = `摄像头权限${CameraPermission.label(state)}，请在系统设置里打开 LocalFace`;
+      CameraPermission.explain(state, () => $('start').click());
+    } else {
+      stat.textContent = '打不开摄像头：' + e.message;
+    }
   }
 };
 
