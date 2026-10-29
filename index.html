@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocalFace · 本地人脸识别</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="logo">L</span>LocalFace <span class="tag">本地识别</span></div>
+    <span class="spacer"></span>
+    <span class="meta" id="libMeta">加载中…</span>
+    <a class="btn ghost sm" href="/admin">管理后台 →</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="page-head">
+    <h1>摄像头识别</h1>
+    <div class="sub">画面只送到本机 127.0.0.1 的识别服务，不上传任何服务器。已登记的人会显示名字和相似度。</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="start" class="primary">开启摄像头</button>
+      <button id="stop" disabled>停止</button>
+      <select id="device" title="摄像头"></select>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="settings-line" style="font-size:13px;color:var(--dim)">判定阈值
+        <input type="range" id="th" min="0.30" max="0.65" step="0.01" value="0.45">
+        <span id="thv" class="threshold-value">0.45</span>
+      </label>
+      <span class="stat" id="stat">未开启</span>
+    </div>
+
+    <div class="stage" id="stage" style="margin-top:12px">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="banner" id="banner"></div>
+    </div>
+
+    <div class="chips" id="peopleChips"></div>
+    <p class="note" style="margin-top:10px" id="hint">
+      绿框 = 已登记的人，黄框 = 未登记 / 不够像。识别需要连续多帧达标，避免闪一下误报。
+    </p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">使用说明</h2>
+    <p class="note">
+      让对方面向镜头、距离 <b>0.5～1.5 米</b>，正面光、不要背光。脸在画面里越大越准，太远或太糊会认不出。<br>
+      支持同时识别多个人，但每个人必须有独立的「人脸档案」——在 <a href="/admin">管理后台</a> 里添加照片、用摄像头录入，或从视频抽帧。<br>
+      阈值 0.45 是默认值：调高更严格，调低更宽松。所有照片、特征和缩略图都保存在本机 <code>data/</code>，不会联网。
+    </p>
+  </div>
+
+  <div class="footer-note">人脸模型来自 InsightFace（SCRFD + ArcFace），仅供个人非商业使用。</div>
+</main>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const video = $('video');
+const overlay = $('overlay');
+const octx = overlay.getContext('2d');
+const stage = $('stage');
+const banner = $('banner');
+const stat = $('stat');
+const thEl = $('th');
+const thv = $('thv');
+const chips = $('peopleChips');
+const libMeta = $('libMeta');
+
+const PALETTE = ['#34d399', '#60a5fa', '#c084fc', '#f472b6', '#fbbf24', '#2dd4bf', '#fb923c', '#a3e635'];
+const colorFor = id => PALETTE[(Number(id) - 1 + PALETTE.length) % PALETTE.length];
+const pct = v => Math.round(v * 100);
+
+let people = [];
+let stream = null;
+let running = false;
+let history = [];
+let frames = 0;
+let fpsAt = 0;
+let lastMs = 0;
+let camLeaseTimer = null;
+
+function claimCameraLease() {
+  const beat = () => {
+    fetch('/api/camera/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner: 'ui' }),
+    }).catch(() => {});
+  };
+  beat();
+  clearInterval(camLeaseTimer);
+  camLeaseTimer = setInterval(beat, 2500);
+}
+
+function releaseCameraLease() {
+  clearInterval(camLeaseTimer);
+  camLeaseTimer = null;
+  fetch('/api/camera/release', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner: 'ui' }),
+  }).catch(() => {});
+}
+
+const cap = document.createElement('canvas');
+const cctx = cap.getContext('2d', { willReadFrequently: true });
+
+function nameOf(id) {
+  return people.find(p => p.id === id)?.name || '已登记人物';
+}
+
+function renderChips() {
+  chips.replaceChildren();
+  if (!people.length) {
+    const a = document.createElement('a');
+    a.href = '/admin';
+    a.className = 'pill';
+    a.textContent = '还没有登记人物 · 去管理后台添加 →';
+    chips.append(a);
+    return;
+  }
+  for (const p of people) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = colorFor(p.id);
+    const label = document.createElement('span');
+    label.textContent = `${p.name} · ${p.faceCount} 张`;
+    chip.append(dot, label);
+    chips.append(chip);
+  }
+}
+
+async function loadState() {
+  const res = await fetch('/api/state');
+  const s = await res.json();
+  if (!res.ok) throw new Error(s.error || `HTTP ${res.status}`);
+  people = s.persons;
+  libMeta.textContent = `${s.personCount} 人 · ${s.faceCount} 张样本`;
+  if (document.activeElement !== thEl) {
+    thEl.value = Number(s.threshold).toFixed(2);
+    thv.textContent = Number(s.threshold).toFixed(2);
+  }
+  renderChips();
+}
+
+loadState().catch(e => {
+  libMeta.textContent = '服务未连接';
+  stat.textContent = '无法连接本机服务：' + e.message;
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (running) {
+      stopRecognition();
+      stat.textContent = '窗口切到后台，摄像头已让给距离提醒';
+    }
+    return;
+  }
+  loadState().catch(() => {});
+});
+setInterval(() => { if (!document.hidden) loadState().catch(() => {}); }, 15000);
+
+// 阈值是全局设置：改完写回 SQLite，管理后台也会同步
+let saveTimer = null;
+thEl.addEventListener('input', () => {
+  thv.textContent = Number(thEl.value).toFixed(2);
+  history = [];
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveThreshold(), 500);
+});
+thEl.addEventListener('change', () => { clearTimeout(saveTimer); saveThreshold(); });
+
+async function saveThreshold() {
+  const value = Number(thEl.value);
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threshold: value }),
+    });
+    const r = await res.json();
+    if (!res.ok) throw new Error(r.error || `HTTP ${res.status}`);
+  } catch (e) {
+    stat.textContent = '阈值保存失败：' + e.message;
+    loadState().catch(() => {});
+  }
+}
+
+async function listDevices() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const current = $('device').value;
+    const sel = $('device');
+    sel.replaceChildren();
+    devices.filter(d => d.kind === 'videoinput').forEach((d, i) => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || `摄像头 ${i + 1}`;
+      sel.append(o);
+    });
+    if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
+  } catch {}
+}
+
+function grab() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const s = Math.min(1, 960 / Math.max(vw, vh));
+  cap.width = Math.round(vw * s);
+  cap.height = Math.round(vh * s);
+  cctx.drawImage(video, 0, 0, cap.width, cap.height);
+  const d = cctx.getImageData(0, 0, cap.width, cap.height);
+  return { buf: d.data.buffer, w: cap.width, h: cap.height };
+}
+
+async function scan(w, h, buf) {
+  const res = await fetch(`/scan?w=${w}&h=${h}&detThreshold=0.5`, { method: 'POST', body: buf });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.status);
+  return data;
+}
+
+function draw(faces, w, h) {
+  const scale = overlay.width / w;
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  octx.font = '600 15px -apple-system, PingFang SC, sans-serif';
+  octx.lineWidth = 2;
+  const th = Number(thEl.value);
+  for (const f of faces) {
+    const hit = f.sim !== null && f.sim >= th && f.personId;
+    const color = hit ? colorFor(f.personId) : '#fbbf24';
+    const x = overlay.width - (f.box.x + f.box.width) * scale; // 画面镜像，框跟着翻回来
+    const y = f.box.y * scale;
+    const bw = f.box.width * scale;
+    const bh = f.box.height * scale;
+    octx.strokeStyle = color;
+    octx.strokeRect(x, y, bw, bh);
+
+    let label, fg = '#fff', bg;
+    if (f.sim === null) {
+      label = '人脸';
+      bg = 'rgba(90,98,112,.9)';
+    } else if (hit) {
+      label = `${f.personName || nameOf(f.personId)} ${pct(f.sim)}%`;
+      bg = color;
+      fg = '#06120d';
+    } else {
+      label = `未知 ${pct(f.sim)}%`;
+      bg = 'rgba(120,130,150,.9)';
+    }
+    const tw = octx.measureText(label).width;
+    const ly = Math.max(0, y - 22);
+    octx.fillStyle = bg;
+    octx.fillRect(x, ly, tw + 14, 22);
+    octx.fillStyle = fg;
+    octx.fillText(label, x + 7, ly + 16);
+  }
+}
+
+function verdict(faces) {
+  const th = Number(thEl.value);
+  const latest = new Map();
+  const frameKnown = new Set();
+  for (const f of faces) {
+    if (!f.personId || f.sim === null) continue;
+    latest.set(f.personId, Math.max(latest.get(f.personId) ?? 0, f.sim));
+    if (f.sim >= th) frameKnown.add(f.personId);
+  }
+  history.push(frameKnown);
+  if (history.length > 12) history.shift();
+
+  const stable = people.filter(p => {
+    let hits = 0;
+    for (const s of history) if (s.has(p.id)) hits++;
+    return hits >= Math.max(2, Math.ceil(history.length * 0.5));
+  });
+
+  if (!faces.length) { banner.className = 'banner'; return; }
+  if (!people.length) {
+    banner.className = 'banner warn';
+    banner.textContent = '还没有登记任何人物，先去管理后台添加';
+    return;
+  }
+  if (stable.length) {
+    const parts = stable.map(p => {
+      const sim = latest.get(p.id);
+      return sim ? `${p.name} ${pct(sim)}%` : p.name;
+    });
+    banner.className = 'banner hit';
+    banner.textContent = `识别到：${parts.join('、')}`;
+    return;
+  }
+
+  const largest = Math.max(...faces.map(f => f.faceW));
+  if (largest < 55) {
+    banner.className = 'banner warn';
+    banner.textContent = '脸太小/太远，靠近摄像头一点再试';
+    return;
+  }
+  const knownNow = faces.filter(f => f.personId && f.sim !== null && f.sim >= th);
+  if (knownNow.length) {
+    const f = knownNow.sort((a, b) => b.sim - a.sim)[0];
+    banner.className = 'banner warn';
+    banner.textContent = `识别中… ${f.personName || nameOf(f.personId)} ${pct(f.sim)}%`;
+    return;
+  }
+  const recognizable = faces.some(f => f.sim !== null);
+  banner.className = 'banner unknown';
+  banner.textContent = recognizable ? '画面里有未登记的人' : '识别中…';
+}
+
+async function loop() {
+  while (running) {
+    const t0 = performance.now();
+    try {
+      const { buf, w, h } = grab();
+      const r = await scan(w, h, buf);
+      lastMs = Math.round(performance.now() - t0);
+      draw(r.faces, w, h);
+      verdict(r.faces);
+      frames++;
+      const now = performance.now();
+      if (now - fpsAt > 1000) {
+        stat.innerHTML = `<b>${(frames * 1000 / (now - fpsAt)).toFixed(1)}</b> fps · 单帧 <b>${lastMs}ms</b>（检测 ${r.ms.det} + 识别 ${r.ms.rec}）· 脸 <b>${r.faces.length}</b> 张`;
+        frames = 0;
+        fpsAt = now;
+      }
+    } catch (e) {
+      stat.textContent = '识别服务出错：' + e.message;
+      await new Promise(r => setTimeout(r, 800));
+    }
+  }
+}
+
+$('start').onclick = async () => {
+  try {
+    const deviceId = $('device').value;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: deviceId ? { deviceId: { exact: deviceId } } : { width: 1280, height: 720 },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+    stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    await listDevices();
+    claimCameraLease();
+    running = true;
+    history = [];
+    lastMs = 0;
+    frames = 0;
+    fpsAt = performance.now();
+    $('start').disabled = true;
+    $('stop').disabled = false;
+    await loadState().catch(() => {});
+    loop();
+  } catch (e) {
+    stat.textContent = '打不开摄像头：' + e.message + '（请允许浏览器摄像头权限）';
+  }
+};
+
+function stopRecognition() {
+  running = false;
+  stream?.getTracks().forEach(t => t.stop());
+  stream = null;
+  video.srcObject = null;
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  banner.className = 'banner';
+  $('start').disabled = false;
+  $('stop').disabled = true;
+  releaseCameraLease();
+}
+
+$('stop').onclick = () => {
+  stopRecognition();
+  stat.textContent = '未开启';
+};
+
+window.addEventListener('beforeunload', () => {
+  releaseCameraLease();
+  stream?.getTracks().forEach(t => t.stop());
+});
+
+navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+  if (!stream) listDevices();
+});
+</script>
+</body>
+</html>

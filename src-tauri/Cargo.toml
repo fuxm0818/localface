@@ -1,0 +1,33 @@
+[package]
+name = "localface"
+version = "1.0.0"
+description = "LocalFace：本地多人物人脸识别桌面应用，画面不出本机"
+license = "MIT"
+repository = "https://github.com/fuxm0818/localface"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "localface_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = ["NSColor", "NSResponder", "NSWindow"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

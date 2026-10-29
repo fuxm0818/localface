@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>用于在摄像头画面里识别已登记的家庭成员。画面只在本机处理，不会上传。</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.utilities</string>
+</dict>
+</plist>

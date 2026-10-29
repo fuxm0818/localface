@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>距离提醒</title>
+<style>
+:root {
+  --amp: 3px;
+  --shake-speed: .8s;
+  --pulse-speed: 1.6s;
+}
+* { box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%; margin: 0; padding: 0;
+  background: transparent; overflow: hidden;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-user-select: none; user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+body.test {
+  background: radial-gradient(90% 80% at 50% 40%, #243244 0%, #0b1220 55%, #05070c 100%);
+}
+
+.guard {
+  position: fixed; inset: 0; z-index: 999999;
+  display: none; overflow: hidden;
+  pointer-events: none;
+}
+.guard.on { display: block; }
+
+/* 两侧红边：只画左右两条光带，主体保持透明 */
+.edge {
+  position: absolute; top: 0; bottom: 0; width: 12vw; z-index: 25;
+  pointer-events: none;
+  animation: edgePulse var(--pulse-speed) ease-in-out infinite;
+}
+.edge.left {
+  left: 0;
+  background: linear-gradient(90deg,
+    rgba(220, 38, 38, .95) 0%, rgba(220, 38, 38, .55) 26%,
+    rgba(220, 38, 38, .16) 62%, rgba(220, 38, 38, 0) 100%);
+}
+.edge.right {
+  right: 0;
+  background: linear-gradient(270deg,
+    rgba(220, 38, 38, .95) 0%, rgba(220, 38, 38, .55) 26%,
+    rgba(220, 38, 38, .16) 62%, rgba(220, 38, 38, 0) 100%);
+}
+.guard.defused .edge {
+  animation: none;
+  background: linear-gradient(90deg, rgba(34, 197, 94, .6), rgba(34, 197, 94, 0));
+}
+.guard.defused .edge.right {
+  background: linear-gradient(270deg, rgba(34, 197, 94, .6), rgba(34, 197, 94, 0));
+}
+/* 炸弹背后一小块局部暗晕，保证可读性，不铺满屏幕 */
+.glow {
+  position: absolute; left: 50%; top: 50%;
+  width: 64vmin; height: 64vmin; transform: translate(-50%, -50%);
+  background: radial-gradient(50% 50% at 50% 50%, rgba(10, 4, 4, .82) 0%, rgba(10, 4, 4, .38) 55%, transparent 78%);
+  z-index: 2; pointer-events: none;
+}
+
+.content {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 4vh 4vw; text-align: center; color: #fff;
+  will-change: transform;
+}
+.content.shake { animation: shake var(--shake-speed) linear infinite; }
+
+.label {
+  margin-bottom: 1.2vh;
+  font-size: clamp(13px, 1.5vw, 19px);
+  font-weight: 700; letter-spacing: .38em;
+  color: #fca5a5;
+  text-shadow: 0 0 18px rgba(239, 68, 68, .8);
+}
+
+.bomb-wrap { filter: drop-shadow(0 26px 54px rgba(0, 0, 0, .8)); }
+.bomb {
+  display: block;
+  width: min(430px, 46vmin); height: auto; overflow: visible;
+  animation: wobble 2.6s ease-in-out infinite;
+}
+.spark {
+  transform-box: fill-box; transform-origin: center;
+  animation: spark .16s ease-in-out infinite alternate;
+}
+.led {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: .06em;
+}
+#count {
+  transform-box: fill-box; transform-origin: center;
+}
+#count.tick { animation: countTick .34s cubic-bezier(.2, 1.6, .4, 1); }
+.bomb.danger { filter: drop-shadow(0 0 46px rgba(239, 68, 68, .95)); }
+.bomb.danger #count { fill: #ff5252; }
+
+.headline {
+  margin-top: 1.4vh;
+  font-size: clamp(24px, 3.6vw, 48px);
+  font-weight: 800; letter-spacing: .06em;
+  color: #fff;
+  text-shadow: 0 0 26px rgba(239, 68, 68, .72), 0 2px 14px rgba(0, 0, 0, .85);
+}
+.hint {
+  margin-top: .9vh;
+  font-size: clamp(14px, 1.5vw, 20px);
+  color: rgba(255, 255, 255, .8);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .9);
+}
+.content.defused .headline {
+  color: #86efac;
+  text-shadow: 0 0 26px rgba(34, 197, 94, .72);
+}
+.content.defused .hint { color: rgba(187, 247, 208, .86); }
+.content.defused .bomb { animation: none; }
+
+.post {
+  position: absolute; inset: 0; z-index: 10;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.post.on { display: flex; }
+.boom {
+  position: relative;
+  font-size: clamp(64px, 13vw, 190px);
+  font-weight: 900; letter-spacing: .04em;
+  color: #fbbf24;
+  text-shadow:
+    0 0 40px rgba(251, 146, 60, .95),
+    0 0 100px rgba(239, 68, 68, .85);
+  animation: boomPop .72s cubic-bezier(.2, 1.6, .4, 1) both;
+}
+.post-title {
+  position: relative; margin-top: 1vh;
+  font-size: clamp(22px, 3vw, 40px); font-weight: 700; color: #fff;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, .9);
+}
+.post-hint {
+  position: relative; margin-top: 1vh;
+  font-size: clamp(14px, 1.6vw, 22px); color: rgba(255, 255, 255, .85);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .9);
+}
+
+.flash {
+  position: absolute; inset: 0; z-index: 20;
+  background: #fff7e6; opacity: 0; pointer-events: none;
+}
+.flash.go { animation: flash .52s ease-out both; }
+.shockwave {
+  position: absolute; left: 50%; top: 50%;
+  width: 90px; height: 90px; margin: -45px 0 0 -45px;
+  border: 12px solid rgba(255, 224, 130, .95);
+  border-radius: 50%; opacity: 0; z-index: 19; pointer-events: none;
+}
+.shockwave.go { animation: shock .8s cubic-bezier(.1, .8, .2, 1) both; }
+#fx {
+  position: absolute; inset: 0; z-index: 15;
+  width: 100%; height: 100%;
+  opacity: 0; pointer-events: none; transition: opacity .12s;
+}
+#fx.on { opacity: 1; }
+
+.debug {
+  position: fixed; left: 18px; bottom: 18px; z-index: 1000000;
+  width: 264px; padding: 14px;
+  border: 1px solid rgba(148, 163, 184, .25);
+  border-radius: 14px;
+  background: rgba(8, 12, 20, .9);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  color: #e2e8f0; font-size: 12px; line-height: 1.5;
+  pointer-events: auto;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.debug[hidden] { display: none; }
+.debug-title {
+  margin-bottom: 8px;
+  font-size: 11px; font-weight: 700; letter-spacing: .12em;
+  color: #94a3b8;
+}
+.debug-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.debug button {
+  appearance: none;
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, .3);
+  border-radius: 8px;
+  background: rgba(30, 41, 59, .85);
+  color: #e2e8f0; font-size: 12px; cursor: pointer;
+}
+.debug button:hover { background: rgba(51, 65, 85, .95); }
+.debug input { accent-color: #ef4444; }
+.debug-state {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, .16);
+  color: #7dd3fc; font-variant-numeric: tabular-nums;
+}
+
+@keyframes edgePulse {
+  0%, 100% { opacity: .5; }
+  50% { opacity: 1; }
+}
+@keyframes wobble {
+  0%, 100% { transform: translateY(0) rotate(-1.2deg); }
+  50% { transform: translateY(-9px) rotate(1.2deg); }
+}
+@keyframes spark {
+  from { transform: scale(.82); opacity: .7; }
+  to { transform: scale(1.18); opacity: 1; }
+}
+@keyframes countTick {
+  0% { transform: scale(1.45); }
+  60% { transform: scale(.92); }
+  100% { transform: scale(1); }
+}
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  12% { transform: translate(calc(var(--amp) * -1), calc(var(--amp) * .35)) rotate(-.35deg); }
+  25% { transform: translate(var(--amp), calc(var(--amp) * -.45)) rotate(.3deg); }
+  38% { transform: translate(calc(var(--amp) * -.7), calc(var(--amp) * -.2)) rotate(-.25deg); }
+  50% { transform: translate(calc(var(--amp) * .85), calc(var(--amp) * .4)) rotate(.4deg); }
+  63% { transform: translate(calc(var(--amp) * -.4), calc(var(--amp) * .5)) rotate(-.3deg); }
+  75% { transform: translate(calc(var(--amp) * .55), calc(var(--amp) * -.3)) rotate(.2deg); }
+  88% { transform: translate(calc(var(--amp) * -.8), 0) rotate(-.2deg); }
+}
+@keyframes flash {
+  0% { opacity: 0; }
+  7% { opacity: .96; }
+  100% { opacity: 0; }
+}
+@keyframes shock {
+  0% { transform: scale(.2); opacity: 1; }
+  100% { transform: scale(26); opacity: 0; }
+}
+@keyframes boomPop {
+  0% { transform: scale(.2) rotate(-20deg); opacity: 0; }
+  60% { transform: scale(1.16) rotate(-4deg); opacity: 1; }
+  100% { transform: scale(1) rotate(-6deg); opacity: 1; }
+}
+@keyframes smoke {
+  from { transform: translate3d(-2%, 1%, 0) scale(1); }
+  to { transform: translate3d(2%, -1%, 0) scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .content.shake, .bomb, .spark, .edge { animation: none !important; }
+  .flash.go { animation-duration: .18s; }
+}
+</style>
+</head>
+<body>
+
+<div class="guard" id="guard" aria-hidden="true">
+  <div class="edge left"></div>
+  <div class="edge right"></div>
+  <div class="glow"></div>
+
+  <div class="content" id="content">
+    <div class="label">⚠ 距离过近</div>
+    <div class="bomb-wrap">
+      <svg class="bomb" id="bomb" viewBox="0 0 280 220" aria-hidden="true">
+        <defs>
+          <linearGradient id="c4Body" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#9aa06b"/>
+            <stop offset="46%" stop-color="#6f7548"/>
+            <stop offset="100%" stop-color="#43471f"/>
+          </linearGradient>
+          <linearGradient id="c4Top" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#b7bd8b"/>
+            <stop offset="100%" stop-color="#8a8f5f"/>
+          </linearGradient>
+          <filter id="ledGlow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="2.6" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <filter id="sparkGlow" x="-120%" y="-120%" width="340%" height="340%">
+            <feGaussianBlur stdDeviation="7" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+
+        <!-- 引线 + 火花 -->
+        <path d="M226 38 C 214 16, 184 12, 172 24" fill="none" stroke="#7c4a1e" stroke-width="7" stroke-linecap="round"/>
+        <g class="spark" filter="url(#sparkGlow)">
+          <circle cx="172" cy="24" r="9" fill="#ffd166"/>
+          <circle cx="172" cy="24" r="4" fill="#fffbe8"/>
+        </g>
+
+        <!-- 药块主体 -->
+        <rect x="34" y="46" width="212" height="148" rx="14" fill="url(#c4Body)" stroke="#2c2f16" stroke-width="3"/>
+        <rect x="34" y="46" width="212" height="26" rx="13" fill="url(#c4Top)" opacity=".8"/>
+        <!-- 塑料封带 -->
+        <rect x="76" y="46" width="18" height="148" fill="#d9d4b8" opacity=".5"/>
+        <rect x="186" y="46" width="18" height="148" fill="#d9d4b8" opacity=".5"/>
+        <!-- C4 标记 -->
+        <text x="52" y="98" font-size="30" font-weight="900" fill="#f4f1de"
+              style="font-family: ui-monospace, Menlo, monospace; letter-spacing:.08em">C4</text>
+        <text x="52" y="120" font-size="12" font-weight="700" fill="#f4f1de" opacity=".65"
+              style="font-family: ui-monospace, Menlo, monospace">DETONATOR</text>
+        <!-- 状态灯 -->
+        <circle cx="232" cy="66" r="7" fill="#ef4444" filter="url(#ledGlow)" class="spark"/>
+
+        <!-- LED 倒计时屏 -->
+        <rect x="120" y="98" width="112" height="62" rx="9" fill="#140505" stroke="#000" stroke-width="2"/>
+        <rect x="126" y="104" width="100" height="50" rx="6" fill="#1c0808" stroke="#3f1212" stroke-width="1.5"/>
+        <text id="count" x="176" y="146" text-anchor="middle" font-size="42" font-weight="800"
+              fill="#ff4646" filter="url(#ledGlow)" class="led">5</text>
+
+        <!-- 雷管线路 -->
+        <path d="M34 150 C 10 150, 14 190, 34 196" fill="none" stroke="#b91c1c" stroke-width="5" stroke-linecap="round"/>
+        <path d="M34 164 C 4 168, 8 206, 40 210" fill="none" stroke="#eab308" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div class="headline" id="headline">屏幕即将爆炸</div>
+    <div class="hint" id="hint">退后一点，炸弹就会拆除</div>
+  </div>
+
+  <div class="post" id="post">
+    <div class="boom">BOOM!</div>
+    <div class="post-title">已爆炸</div>
+    <div class="post-hint">退后一点，重新开始</div>
+  </div>
+
+  <div class="flash" id="flash"></div>
+  <div class="shockwave" id="shockwave"></div>
+  <canvas id="fx"></canvas>
+</div>
+
+<div class="debug" id="debug" hidden>
+  <div class="debug-title">距离提醒 · 调试</div>
+  <label class="debug-row">
+    <input type="checkbox" id="simClose" /> 模拟距离过近
+  </label>
+  <label class="debug-row">
+    <input type="checkbox" id="liveCam" /> 使用摄像头
+  </label>
+  <div class="debug-row">
+    <button id="simNow">立刻演示</button>
+    <button id="simReset">重置</button>
+    <button id="camRetry">重开</button>
+  </div>
+  <div class="debug-state" id="debugState">idle</div>
+  <div class="debug-state" id="camState">摄像头未启动</div>
+  <div class="debug-state" id="whoState">未识别</div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const guard = $('guard');
+  const content = $('content');
+  const headline = $('headline');
+  const hint = $('hint');
+  const countEl = $('count');
+  const bomb = $('bomb');
+  const post = $('post');
+  const flash = $('flash');
+  const shock = $('shockwave');
+  const canvas = $('fx');
+  const ctx = canvas.getContext('2d');
+  const debugEl = $('debug');
+  const debugState = $('debugState');
+  const camStateEl = $('camState');
+  const whoStateEl = $('whoState');
+  const simClose = $('simClose');
+  const liveCam = $('liveCam');
+  const camRetry = $('camRetry');
+
+  const TEST_MODE = new URLSearchParams(location.search).has('test') || location.hash === '#test';
+
+  const CFG = {
+    enterMs: 1200,
+    exitMs: 700,
+    lostExitMs: 2600,
+    countdown: 5,
+    boomMs: 2200,
+    defuseMs: 800,
+    frameMs: 200,
+    identityMs: 900,
+    knownTtlMs: 2500,
+    configMs: 5000,
+  };
+
+  const S = {
+    mode: 'idle',
+    close: false,
+    seen: false,
+    ratio: 0,
+    name: '',
+    closeAt: 0,
+    farAt: 0,
+    warnAt: 0,
+    countdown: CFG.countdown,
+    lastSec: null,
+    lastUpdateAt: 0,
+    countTimer: 0,
+    testTimer: 0,
+    testUntil: 0,
+    fxRaf: 0,
+    lastFx: 0,
+    particles: [],
+  };
+
+  const CAM = {
+    config: null,
+    profiles: new Map(),
+    minThreshold: 0,
+    want: false,
+    stream: null,
+    state: 'off',
+    error: '',
+    loopTimer: 0,
+    leaseAt: 0,
+    scanning: false,
+    frames: 0,
+    fps: 0,
+    fpsAt: 0,
+    ratios: [],
+    lastRatio: 0,
+    lastIdentityAt: 0,
+    lastKnown: null,
+    knownAt: 0,
+    wasClose: false,
+    lastReportAt: 0,
+  };
+
+  const camVideo = document.createElement('video');
+  camVideo.muted = true;
+  camVideo.playsInline = true;
+  camVideo.autoplay = true;
+
+  const camCap = document.createElement('canvas');
+  const camCtx = camCap.getContext('2d', { willReadFrequently: true });
+
+  const now = () => performance.now();
+  const isFar = () => !S.close || !S.seen;
+  const warnMessage = (name) => (name ? `${name}，你距离屏幕太近了，离远点！` : '你距离屏幕太近了，离远点！');
+
+  function paintDebug() {
+    if (debugState) {
+      const seen = S.seen ? '' : ' · 无人脸';
+      debugState.textContent = `${S.mode} · ratio ${Number(S.ratio || 0).toFixed(3)}${seen}`;
+    }
+    if (camStateEl) {
+      const cfg = CAM.config;
+      const bits = [];
+      if (CAM.state === 'on') bits.push(`摄像头 ${Math.round(CAM.fps)}fps`);
+      else if (CAM.state === 'error') bits.push(`摄像头错误：${CAM.error}`);
+      else if (CAM.state === 'waiting') bits.push('摄像头让给后台');
+      else bits.push('摄像头未启动');
+      if (cfg) bits.push(`总开关${cfg.enabled ? '开' : '关'} · 启用 ${cfg.activeCount ?? 0} 人`);
+      camStateEl.textContent = bits.join(' · ');
+    }
+    if (whoStateEl) {
+      const known = CAM.lastKnown;
+      if (known && now() - CAM.knownAt < CFG.knownTtlMs) {
+        const profile = CAM.profiles.get(known.personId);
+        const thr = profile?.threshold || 0;
+        whoStateEl.textContent = `认出「${known.name}」 · 触发线 ${thr.toFixed(3)} · 当前 ${Number(S.ratio || 0).toFixed(3)}`;
+      } else {
+        whoStateEl.textContent = '未识别到已登记的人';
+      }
+    }
+  }
+
+  function setMode(mode) {
+    S.mode = mode;
+    paintDebug();
+  }
+
+  function show() {
+    guard.classList.add('on');
+    guard.setAttribute('aria-hidden', 'false');
+    resizeCanvas();
+  }
+
+  function hide() {
+    guard.classList.remove('on', 'defused');
+    guard.setAttribute('aria-hidden', 'true');
+    stopFx();
+    post.classList.remove('on');
+    content.classList.remove('shake', 'defused');
+    content.style.display = '';
+    bomb.classList.remove('danger');
+    flash.classList.remove('go');
+    shock.classList.remove('go');
+    countEl.classList.remove('tick');
+    countEl.textContent = String(CFG.countdown);
+    headline.textContent = warnMessage('');
+    hint.textContent = '退后一点，炸弹就会拆除';
+  }
+
+  function setIntensity(progress) {
+    const p = Math.max(0, Math.min(1, progress));
+    document.documentElement.style.setProperty('--amp', `${2 + p * 9}px`);
+    document.documentElement.style.setProperty('--shake-speed', `${0.85 - p * 0.55}s`);
+    document.documentElement.style.setProperty('--pulse-speed', `${1.8 - p * 1.15}s`);
+  }
+
+  function startWarn(seconds = CFG.countdown) {
+    clearTimeout(S.testTimer);
+    S.countdown = Math.max(1, Number(seconds) || CFG.countdown);
+    S.warnAt = now();
+    S.lastSec = null;
+    S.farAt = 0;
+    S.closeAt = 0;
+    setMode('warn');
+    content.style.display = '';
+    content.classList.add('shake');
+    content.classList.remove('defused');
+    post.classList.remove('on');
+    guard.classList.remove('defused');
+    bomb.classList.remove('danger');
+    countEl.textContent = String(S.countdown);
+    headline.textContent = warnMessage(S.name);
+    hint.textContent = '退后一点，炸弹就会拆除';
+    setIntensity(0);
+    show();
+    if (!S.countTimer) S.countTimer = window.setTimeout(step, 100);
+  }
+
+  function step() {
+    S.countTimer = 0;
+    if (S.mode !== 'warn') return;
+
+    const remaining = Math.max(0, S.countdown - (now() - S.warnAt) / 1000);
+    const sec = Math.ceil(remaining);
+    if (sec !== S.lastSec) {
+      S.lastSec = sec;
+      if (sec > 0) countEl.textContent = String(sec);
+      countEl.classList.remove('tick');
+      void countEl.getBoundingClientRect();
+      countEl.classList.add('tick');
+    }
+    setIntensity(1 - remaining / S.countdown);
+    bomb.classList.toggle('danger', remaining <= 2);
+
+    if (remaining <= 0) {
+      boom();
+      return;
+    }
+    S.countTimer = window.setTimeout(step, 100);
+  }
+
+  function defuse() {
+    if (S.mode !== 'warn') return;
+    setMode('defuse');
+    content.classList.remove('shake');
+    content.classList.add('defused');
+    guard.classList.add('defused');
+    bomb.classList.remove('danger');
+    countEl.textContent = '✓';
+    countEl.classList.remove('tick');
+    headline.textContent = '拆弹成功';
+    hint.textContent = '继续保持距离';
+    setIntensity(0);
+    clearTimeout(S.testTimer);
+    S.testTimer = window.setTimeout(reset, CFG.defuseMs);
+  }
+
+  function boom() {
+    setMode('boom');
+    setIntensity(1);
+    content.style.display = 'none';
+    post.classList.add('on');
+    flash.classList.remove('go');
+    shock.classList.remove('go');
+    void flash.offsetWidth;
+    void shock.offsetWidth;
+    flash.classList.add('go');
+    shock.classList.add('go');
+    canvas.classList.add('on');
+    spawnFx();
+    window.setTimeout(() => {
+      if (S.mode === 'boom') setMode('post');
+    }, CFG.boomMs);
+  }
+
+  function update({ close, seen, ratio, name } = {}) {
+    S.close = !!close;
+    S.seen = seen !== false;
+    if (typeof ratio === 'number' && Number.isFinite(ratio)) S.ratio = ratio;
+    if (typeof name === 'string') S.name = name.trim();
+    S.lastUpdateAt = now();
+    paintDebug();
+
+    if (S.testUntil) return;
+    const t = now();
+
+    if (S.mode === 'idle') {
+      if (S.close && S.seen) {
+        if (!S.closeAt) S.closeAt = t;
+        if (t - S.closeAt >= CFG.enterMs) startWarn();
+      } else {
+        S.closeAt = 0;
+      }
+      return;
+    }
+
+    if (S.mode === 'warn' || S.mode === 'post') {
+      if (isFar()) {
+        if (!S.farAt) S.farAt = t;
+        const grace = S.seen ? CFG.exitMs : CFG.lostExitMs;
+        if (t - S.farAt >= grace) {
+          if (S.mode === 'warn') defuse();
+          else reset();
+        }
+      } else {
+        S.farAt = 0;
+      }
+    }
+  }
+
+  function reset() {
+    clearTimeout(S.testTimer);
+    S.testTimer = 0;
+    S.testUntil = 0;
+    S.closeAt = 0;
+    S.farAt = 0;
+    S.lastSec = null;
+    if (S.countTimer) {
+      clearTimeout(S.countTimer);
+      S.countTimer = 0;
+    }
+    setMode('idle');
+    hide();
+  }
+
+  function test(seconds = 6) {
+    const secs = Math.max(1, Number(seconds) || 6);
+    reset();
+    S.testUntil = now() + (secs + CFG.boomMs / 1000 + 4) * 1000;
+    startWarn(secs);
+    S.testTimer = window.setTimeout(reset, (secs + CFG.boomMs / 1000 + 3.2) * 1000);
+  }
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(window.innerWidth * dpr));
+    canvas.height = Math.max(1, Math.floor(window.innerHeight * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function spawnFx() {
+    S.particles.length = 0;
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const sparkColors = ['#fff7d6', '#fde047', '#fbbf24', '#fb923c', '#ef4444', '#f97316'];
+
+    for (let i = 0; i < 220; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 160 + Math.random() * 900;
+      S.particles.push({
+        kind: 'spark',
+        x: cx, y: cy,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed,
+        age: 0,
+        life: 0.5 + Math.random() * 1.1,
+        size: 1.5 + Math.random() * 5,
+        color: sparkColors[(Math.random() * sparkColors.length) | 0],
+      });
+    }
+    for (let i = 0; i < 36; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 30 + Math.random() * 130;
+      S.particles.push({
+        kind: 'smoke',
+        x: cx + (Math.random() - 0.5) * 120,
+        y: cy + (Math.random() - 0.5) * 80,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed - 20,
+        age: 0,
+        life: 1.6 + Math.random() * 1.6,
+        size: 30 + Math.random() * 70,
+        color: '120,113,108',
+      });
+    }
+
+    if (!S.fxRaf) {
+      S.lastFx = now();
+      S.fxRaf = requestAnimationFrame(fxStep);
+    }
+  }
+
+  function fxStep() {
+    S.fxRaf = 0;
+    const t = now();
+    const dt = Math.min(0.05, (t - S.lastFx) / 1000);
+    S.lastFx = t;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    for (let i = S.particles.length - 1; i >= 0; i--) {
+      const p = S.particles[i];
+      p.age += dt;
+      if (p.age >= p.life) {
+        S.particles.splice(i, 1);
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+
+      if (p.kind === 'spark') {
+        p.vy += 780 * dt;
+        p.vx *= 0.992;
+        p.vy *= 0.992;
+        const alpha = Math.max(0, 1 - p.age / p.life);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (0.4 + alpha * 0.6), 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        p.vx *= 0.985;
+        p.vy *= 0.985;
+        const alpha = Math.max(0, 0.22 * (1 - p.age / p.life));
+        const r = p.size * (1 + p.age);
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, `rgba(${p.color},${alpha})`);
+        g.addColorStop(1, `rgba(${p.color},0)`);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.globalAlpha = 1;
+    if (S.particles.length || S.mode === 'boom') {
+      S.fxRaf = requestAnimationFrame(fxStep);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+      canvas.classList.remove('on');
+    }
+  }
+
+  function stopFx() {
+    if (S.fxRaf) {
+      cancelAnimationFrame(S.fxRaf);
+      S.fxRaf = 0;
+    }
+    S.particles.length = 0;
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    canvas.classList.remove('on');
+  }
+
+  // ---------- 摄像头与距离判断 ----------
+  async function heartbeat() {
+    try {
+      const res = await fetch('/api/camera/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ owner: 'guard' }),
+      });
+      if (!res.ok) return 'guard';
+      return (await res.json()).owner;
+    } catch {
+      return 'guard';
+    }
+  }
+
+  async function report() {
+    if (TEST_MODE) return;
+    const knownFresh = CAM.lastKnown && now() - CAM.knownAt < CFG.knownTtlMs;
+    try {
+      await fetch('/api/guard/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({
+          mode: S.mode,
+          ratio: S.ratio,
+          seen: S.seen,
+          close: S.close,
+          personId: knownFresh ? CAM.lastKnown.personId : null,
+          personName: knownFresh ? CAM.lastKnown.name : '',
+          fps: Math.round(CAM.fps),
+          camera: CAM.state,
+          error: CAM.error,
+        }),
+      });
+    } catch {}
+  }
+
+  function applyConfig(cfg) {
+    CAM.config = cfg;
+    CAM.profiles = new Map((cfg.profiles || []).map(p => [p.personId, p]));
+    const active = (cfg.profiles || []).filter(p => p.enabled && p.calibrated);
+    CAM.minThreshold = active.length ? Math.min(...active.map(p => p.threshold)) : 0;
+    CAM.want = !!cfg.enabled && active.length > 0;
+    if (TEST_MODE && !(liveCam && liveCam.checked)) CAM.want = false;
+    if (TEST_MODE && liveCam && liveCam.checked) CAM.want = true;
+    paintDebug();
+
+    if (!CAM.want) {
+      stopCamera();
+      // 调试页的模拟开关自己驱动状态，不能被配置轮询清掉
+      if (!TEST_MODE) update({ close: false, seen: false, ratio: 0 });
+      return;
+    }
+    scheduleLoop(0);
+  }
+
+  async function loadConfig() {
+    try {
+      const res = await fetch('/api/guard', { cache: 'no-store' });
+      if (res.ok) applyConfig(await res.json());
+    } catch {}
+  }
+
+  function scheduleLoop(delay = CFG.frameMs) {
+    if (CAM.loopTimer || CAM.scanning) return;
+    CAM.loopTimer = window.setTimeout(loop, delay);
+  }
+
+  async function loop() {
+    CAM.loopTimer = 0;
+    if (!CAM.want) return;
+    const t = now();
+
+    if (t - CAM.leaseAt > 2500) {
+      CAM.leaseAt = t;
+      const owner = await heartbeat();
+      if (!CAM.want) return;
+      if (owner !== 'guard') {
+        stopCamera('waiting');
+        paintDebug();
+        scheduleLoop(2500);
+        return;
+      }
+    }
+
+    if (!CAM.stream) {
+      const ok = await startCamera();
+      paintDebug();
+      if (!ok) {
+        scheduleLoop(5000);
+        return;
+      }
+    }
+
+    const frame = grabFrame();
+    if (!frame) {
+      scheduleLoop(400);
+      return;
+    }
+
+    CAM.scanning = true;
+    let failed = false;
+    try {
+      const detect = await scan(frame, false);
+      handleDetection(detect, frame.w);
+
+      const sinceIdentity = now() - CAM.lastIdentityAt;
+      const nearEnough = CAM.minThreshold === 0
+        ? detect.faces.length > 0
+        : S.ratio >= CAM.minThreshold * 0.85;
+      if (detect.faces.length && nearEnough && sinceIdentity >= CFG.identityMs) {
+        CAM.lastIdentityAt = now();
+        handleIdentity(await scan(frame, true));
+      }
+      CAM.error = '';
+    } catch (e) {
+      failed = true;
+      CAM.error = e?.message || '识别请求失败';
+    } finally {
+      CAM.scanning = false;
+    }
+
+    CAM.frames++;
+    if (t - CAM.fpsAt >= 1000) {
+      CAM.fps = CAM.frames * 1000 / Math.max(1, t - CAM.fpsAt);
+      CAM.frames = 0;
+      CAM.fpsAt = t;
+    }
+    paintDebug();
+    if (CAM.want) scheduleLoop(failed ? 1500 : CFG.frameMs);
+  }
+
+  async function scan(frame, identity) {
+    const res = await fetch(
+      `/scan?w=${frame.w}&h=${frame.h}&detThreshold=0.45&identity=${identity ? 1 : 0}`,
+      { method: 'POST', body: frame.buf, cache: 'no-store' },
+    );
+    if (!res.ok) throw new Error(`识别服务返回 ${res.status}`);
+    return res.json();
+  }
+
+  function grabFrame() {
+    const vw = camVideo.videoWidth;
+    const vh = camVideo.videoHeight;
+    if (!vw || !vh) return null;
+    const w = 640;
+    const h = Math.max(1, Math.round(w * vh / vw));
+    if (camCap.width !== w || camCap.height !== h) {
+      camCap.width = w;
+      camCap.height = h;
+    }
+    camCtx.drawImage(camVideo, 0, 0, w, h);
+    return { buf: camCtx.getImageData(0, 0, w, h).data, w, h };
+  }
+
+  function handleDetection(data, w) {
+    const faces = data.faces || [];
+    const primary = faces.slice().sort((a, b) => b.faceW - a.faceW)[0];
+    const ratio = primary ? primary.faceW / w : 0;
+    CAM.ratios.push(ratio);
+    if (CAM.ratios.length > 3) CAM.ratios.shift();
+    const sorted = CAM.ratios.slice().sort((a, b) => a - b);
+    const smooth = sorted[sorted.length >> 1];
+    CAM.lastRatio = smooth;
+    drive(!!primary, smooth);
+  }
+
+  function handleIdentity(data) {
+    const faces = data.faces || [];
+    const maxW = faces.reduce((n, f) => Math.max(n, f.faceW), 0);
+    const known = faces
+      .filter(f => f.known && f.personId && f.faceW >= maxW * 0.8)
+      .sort((a, b) => b.faceW - a.faceW)[0];
+    if (!known) return;
+    const changed = CAM.lastKnown?.personId !== known.personId;
+    CAM.lastKnown = { personId: known.personId, name: known.personName };
+    CAM.knownAt = now();
+    if (changed) paintDebug();
+    drive(true, CAM.lastRatio);
+  }
+
+  function drive(seen, ratio) {
+    const knownFresh = CAM.lastKnown && now() - CAM.knownAt < CFG.knownTtlMs;
+    const profile = knownFresh ? CAM.profiles.get(CAM.lastKnown.personId) : null;
+    let close = false;
+    if (seen && profile && profile.enabled && profile.calibrated) {
+      const thr = profile.threshold;
+      close = CAM.wasClose ? ratio > thr * 0.9 : ratio >= thr;
+    }
+    CAM.wasClose = close;
+    update({ close, seen, ratio, name: knownFresh ? CAM.lastKnown.name : '' });
+  }
+
+  async function startCamera() {
+    if (CAM.stream) return true;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      CAM.state = 'error';
+      CAM.error = '当前环境不支持摄像头';
+      return false;
+    }
+    try {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 30 } },
+          audio: false,
+        });
+      } catch (e) {
+        // WKWebView 对部分约束报 Invalid constraint，降级成无约束重试
+        if (e?.name === 'OverconstrainedError' || e?.name === 'TypeError') {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } else {
+          throw e;
+        }
+      }
+      CAM.stream = stream;
+      camVideo.srcObject = stream;
+      await camVideo.play().catch(() => {});
+      CAM.state = 'on';
+      CAM.error = '';
+      CAM.ratios.length = 0;
+      CAM.fpsAt = now();
+      CAM.frames = 0;
+      return true;
+    } catch (e) {
+      CAM.state = 'error';
+      CAM.error = e?.name === 'NotAllowedError' ? '摄像头权限未开启' : (e?.message || '打不开摄像头');
+      return false;
+    }
+  }
+
+  function stopCamera(state = 'off') {
+    CAM.stream?.getTracks().forEach(track => track.stop());
+    CAM.stream = null;
+    if (camVideo.srcObject) camVideo.srcObject = null;
+    CAM.state = state;
+    CAM.ratios.length = 0;
+    CAM.lastKnown = null;
+    CAM.knownAt = 0;
+    CAM.lastRatio = 0;
+    CAM.wasClose = false;
+    CAM.fps = 0;
+  }
+
+  async function bootCamera() {
+    await loadConfig();
+    setInterval(loadConfig, CFG.configMs);
+    setInterval(report, 2000);
+  }
+
+
+  window.__guardTest = (seconds) => test(seconds);
+  window.__guardUpdate = (opts) => update(opts || {});
+  window.__guardReset = () => reset();
+  window.__guardShow = () => startWarn();
+  window.__guardState = () => ({ mode: S.mode, ratio: S.ratio, close: S.close, seen: S.seen });
+  window.__guardCam = () => ({
+    state: CAM.state,
+    error: CAM.error,
+    fps: Math.round(CAM.fps),
+    want: CAM.want,
+    ratio: CAM.lastRatio,
+    known: CAM.lastKnown,
+    activeCount: CAM.config?.activeCount ?? 0,
+  });
+  window.__guardReady = true;
+
+  if (TEST_MODE) {
+    document.body.classList.add('test');
+    if (debugEl) debugEl.hidden = false;
+
+    setInterval(() => {
+      if (CAM.want) return;
+      update({
+        close: !!(simClose && simClose.checked),
+        seen: true,
+        ratio: simClose && simClose.checked ? 0.42 : 0.07,
+        name: '',
+      });
+    }, 200);
+
+    if (liveCam) {
+      liveCam.addEventListener('change', () => {
+        if (CAM.config) applyConfig(CAM.config);
+        else loadConfig();
+      });
+    }
+    if (camRetry) {
+      camRetry.addEventListener('click', () => {
+        stopCamera();
+        CAM.leaseAt = 0;
+        if (CAM.config) applyConfig(CAM.config);
+        else loadConfig();
+      });
+    }
+
+    const btnNow = $('simNow');
+    const btnReset = $('simReset');
+    if (btnNow) btnNow.addEventListener('click', () => test(5));
+    if (btnReset) btnReset.addEventListener('click', () => {
+      if (simClose) simClose.checked = false;
+      reset();
+    });
+  }
+
+  // 摄像头或页面被系统挂起时，不能让警告一直停在屏幕上
+  setInterval(() => {
+    if (S.mode === 'idle' || !S.lastUpdateAt) return;
+    if (now() - S.lastUpdateAt > 4500) reset();
+  }, 1000);
+
+  bootCamera();
+
+  window.addEventListener('resize', () => {
+    if (guard.classList.contains('on')) resizeCanvas();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') reset();
+  });
+
+  hide();
+})();
+</script>
+</body>
+</html>

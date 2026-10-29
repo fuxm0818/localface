@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理后台 · LocalFace</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/" style="color:inherit;text-decoration:none">
+      <span class="logo">L</span>LocalFace <span class="tag">管理后台</span>
+    </a>
+    <span class="spacer"></span>
+    <span class="meta" id="libMeta">加载中…</span>
+    <a class="btn ghost sm" href="/">← 识别页</a>
+  </div>
+</header>
+
+<main class="wrap wide">
+  <div class="page-head">
+    <h1>人物库</h1>
+    <div class="sub">给每个人建一张「人脸档案」：上传照片、用摄像头录一段，或从视频里抽帧。识别页会自动认出画面里的每个人。</div>
+  </div>
+
+  <div class="admin-grid">
+    <aside>
+      <div class="card sidebar">
+        <div class="card-head">
+          <h2>人物</h2>
+          <button id="addPersonBtn" class="primary sm">＋ 新增</button>
+        </div>
+        <div class="person-list" id="personList"></div>
+        <div class="note" id="noPersons" hidden>还没有人物。点上面的「＋ 新增」先建一个。</div>
+        <div class="note" id="libStats" style="margin-top:12px;border-top:1px solid var(--line-soft);padding-top:10px;word-break:break-all"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>识别设置</h2></div>
+        <div class="settings-line">
+          <input type="range" id="th" min="0.30" max="0.65" step="0.01" value="0.45">
+          <span class="threshold-value" id="thv">0.45</span>
+        </div>
+        <p class="note" style="margin-top:8px">相似度超过该值才算认出。调高更严格（少认错），调低更宽松（少漏认）。默认 <b>0.45</b>，改完立即生效，识别页同步。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>距离提醒</h2></div>
+        <label class="check"><input type="checkbox" id="guardEnabled"> 启用距离提醒</label>
+        <div class="guard-status" id="guardStatus">读取中…</div>
+        <p class="note" style="margin-top:8px">离屏幕太近时全屏弹出炸弹警告，退后自动消失。只对右侧「已启用 + 已校准」的人生效。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>操作日志</h2>
+          <span class="spacer"></span>
+          <button id="clearLogBtn" class="sm ghost">清空</button>
+        </div>
+        <div class="log" id="log"></div>
+      </div>
+    </aside>
+
+    <section>
+      <div class="empty-state" id="emptyState">
+        <div class="big">＋</div>
+        <div>先在左侧新增一个人物，<br>然后上传照片或用摄像头录入。</div>
+      </div>
+
+      <div id="detail" hidden>
+        <div class="card">
+          <div class="detail-head">
+            <div class="avatar lg" id="pAvatar"></div>
+            <div class="info">
+              <h2 id="pName"></h2>
+              <div class="sub" id="pMeta"></div>
+              <div class="sub" id="pNote" style="color:var(--muted)"></div>
+            </div>
+            <button id="editPersonBtn" class="sm">编辑</button>
+            <button id="deletePersonBtn" class="sm danger">删除人物</button>
+          </div>
+
+          <div class="enroll-grid">
+            <div class="enroll-card">
+              <h3><span class="ico">🖼</span>上传照片</h3>
+              <div class="hint">可多选；多人合影会被跳过，只收单人人脸。</div>
+              <label class="drop" id="photoDrop">
+                <input type="file" id="photoInput" accept="image/*" multiple>
+                <span class="big">选择照片</span>
+                <span>点击选择，或把照片拖到这里</span>
+                <span class="sub">jpg / png / webp</span>
+              </label>
+              <div class="row" style="margin-top:10px">
+                <button id="folderBtn" class="sm">选择整个文件夹</button>
+                <input type="file" id="folderInput" webkitdirectory accept="image/*" hidden>
+              </div>
+            </div>
+
+            <div class="enroll-card">
+              <h3><span class="ico">📷</span>摄像头录入</h3>
+              <div class="hint">让画面里只有一个人，正对镜头、光线充足。</div>
+              <div class="cam-preview">
+                <video id="cam" autoplay playsinline muted></video>
+                <div class="off" id="camOff">摄像头未开启</div>
+              </div>
+              <div class="row">
+                <select id="camDevice" class="grow" title="摄像头"></select>
+                <button id="camOpenBtn" class="sm primary">开启</button>
+                <button id="camCloseBtn" class="sm" disabled>关闭</button>
+              </div>
+              <div class="row">
+                <button id="camShotBtn" class="sm ok" disabled>录入当前画面</button>
+                <button id="camBurstBtn" class="sm" disabled>连拍 8 张</button>
+              </div>
+              <p class="hint" style="margin:10px 0 0">只保存对齐后的人脸缩略图和 512 维特征，不保存整张摄像头画面。</p>
+            </div>
+
+            <div class="enroll-card span2">
+              <h3><span class="ico">🎞</span>视频抽帧</h3>
+              <div class="hint">选一段视频，在本地浏览器里按时间均匀截取若干帧，逐帧提特征。视频不会上传，也不会被保存。</div>
+              <input type="file" id="videoInput" accept="video/*">
+              <video id="videoPreview" class="video-preview" controls muted playsinline preload="metadata" hidden></video>
+              <div class="row">
+                <select id="frameCount">
+                  <option value="8">抽 8 帧</option>
+                  <option value="12" selected>抽 12 帧</option>
+                  <option value="20">抽 20 帧</option>
+                </select>
+                <button id="videoExtractBtn" class="primary sm" disabled>抽取帧并录入</button>
+                <span class="stat" id="videoMeta"></span>
+              </div>
+              <div class="progress" id="videoProgress"><i></i></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>距离提醒</h2>
+            <span class="pill" id="guardPersonState">未校准</span>
+            <span class="spacer"></span>
+            <label class="check"><input type="checkbox" id="guardPersonEnabled"> 对「<span id="guardPersonName">此人</span>」启用</label>
+          </div>
+          <div class="row">
+            <label class="stat">提醒距离
+              <input type="number" id="guardWarnCm" min="25" max="150" step="5" value="60" style="width:84px;margin:0 4px">
+              cm
+            </label>
+            <button id="guardCalibrateBtn" class="sm primary">开始校准</button>
+            <span class="stat" id="guardCalibInfo"></span>
+          </div>
+          <div class="progress" id="guardCalibProgress"><i></i></div>
+          <p class="note" id="guardCalibHint" style="margin-top:10px"></p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>人脸样本</h2>
+            <span class="pill" id="faceCount">0 张</span>
+            <span class="spacer"></span>
+            <button id="refreshFacesBtn" class="sm ghost">刷新</button>
+          </div>
+          <div class="face-grid" id="faceGrid"></div>
+          <div class="note" id="faceEmpty" hidden style="text-align:center;padding:24px 0">还没有样本，从上面任选一种方式录入。</div>
+          <p class="note" style="margin-top:12px">建议每个人至少 <b>30 张</b>、覆盖不同角度和光线。样本缩略图存放在本机 <code>data/thumbs/</code>，删除人物会一并删除。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="card" id="markCard">
+    <div class="card-head">
+      <h2>图片标注</h2>
+      <span class="pill" id="markStat">未选择图片</span>
+      <span class="spacer"></span>
+      <button id="markBtn" class="primary sm" disabled>标出人物</button>
+    </div>
+    <div class="row">
+      <input type="file" id="markInput" accept="image/*">
+      <button id="markRetryBtn" class="sm ghost" hidden>重新标注</button>
+    </div>
+    <div class="mark-stage" id="markStage" hidden>
+      <canvas id="markCanvas"></canvas>
+    </div>
+    <p class="note" style="margin-top:10px">上传一张图片，标出里面每个人是谁：<b>绿框 + 名字</b> 是库里已登记的人（含相似度），<b>黄框</b> 是陌生人。图片只在浏览器里压到 1600px 后发给本机识别服务，不会保存。</p>
+  </div>
+
+  <div class="footer-note">
+    所有照片、视频和特征只在本机处理。识别服务只监听 127.0.0.1，不连接任何外部服务器。<br>
+    人脸模型来自 InsightFace，仅供个人非商业使用。
+  </div>
+</main>
+
+<dialog id="personDialog">
+  <form id="personForm">
+    <h2 id="dlgTitle">新增人物</h2>
+    <label class="field">名字
+      <input type="text" id="dlgName" maxlength="30" autocomplete="off" placeholder="比如：儿子、妈妈">
+    </label>
+    <label class="field">备注（可选）
+      <textarea id="dlgNote" maxlength="200" placeholder="比如：2026 年照片"></textarea>
+    </label>
+    <div class="note" id="dlgErr" style="color:var(--danger)"></div>
+    <div class="actions">
+      <button type="button" id="dlgCancelBtn" class="ghost">取消</button>
+      <button type="submit" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirmDialog">
+  <h2 id="confirmMsg"></h2>
+  <div class="actions">
+    <button type="button" id="confirmCancel" class="ghost">取消</button>
+    <button type="button" id="confirmOk" class="danger">删除</button>
+  </div>
+</dialog>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+
+// WKWebView 不支持 window.confirm，用页面内弹窗代替
+const confirmDialog = $('confirmDialog');
+const confirmMsg = $('confirmMsg');
+const confirmOk = $('confirmOk');
+const confirmCancel = $('confirmCancel');
+function askConfirm(message) {
+  return new Promise(resolve => {
+    confirmMsg.textContent = message;
+    confirmDialog.showModal();
+    const done = (v) => {
+      confirmDialog.close();
+      confirmOk.onclick = confirmCancel.onclick = null;
+      resolve(v);
+    };
+    confirmOk.onclick = () => done(true);
+    confirmCancel.onclick = () => done(false);
+    confirmDialog.oncancel = (e) => { e.preventDefault(); done(false); };
+  });
+}
+
+const personList = $('personList');
+const noPersons = $('noPersons');
+const libMeta = $('libMeta');
+const libStats = $('libStats');
+const emptyState = $('emptyState');
+const detail = $('detail');
+const pAvatar = $('pAvatar');
+const pName = $('pName');
+const pMeta = $('pMeta');
+const pNote = $('pNote');
+const faceGrid = $('faceGrid');
+const faceEmpty = $('faceEmpty');
+const faceCount = $('faceCount');
+const logEl = $('log');
+const thEl = $('th');
+const thv = $('thv');
+const guardEnabled = $('guardEnabled');
+const guardStatus = $('guardStatus');
+const guardPersonEnabled = $('guardPersonEnabled');
+const guardPersonName = $('guardPersonName');
+const guardPersonState = $('guardPersonState');
+const guardWarnCm = $('guardWarnCm');
+const guardCalibrateBtn = $('guardCalibrateBtn');
+const guardCalibInfo = $('guardCalibInfo');
+const guardCalibHint = $('guardCalibHint');
+const guardCalibProgress = $('guardCalibProgress');
+
+const addPersonBtn = $('addPersonBtn');
+const editPersonBtn = $('editPersonBtn');
+const deletePersonBtn = $('deletePersonBtn');
+const photoInput = $('photoInput');
+const folderBtn = $('folderBtn');
+const folderInput = $('folderInput');
+const photoDrop = $('photoDrop');
+const cam = $('cam');
+const camOff = $('camOff');
+const camDevice = $('camDevice');
+const camOpenBtn = $('camOpenBtn');
+const camCloseBtn = $('camCloseBtn');
+const camShotBtn = $('camShotBtn');
+const camBurstBtn = $('camBurstBtn');
+const videoInput = $('videoInput');
+const videoPreview = $('videoPreview');
+const videoMeta = $('videoMeta');
+const frameCount = $('frameCount');
+const videoExtractBtn = $('videoExtractBtn');
+const videoProgress = $('videoProgress');
+const refreshFacesBtn = $('refreshFacesBtn');
+
+const personDialog = $('personDialog');
+const personForm = $('personForm');
+const dlgTitle = $('dlgTitle');
+const dlgName = $('dlgName');
+const dlgNote = $('dlgNote');
+const dlgErr = $('dlgErr');
+const dlgCancelBtn = $('dlgCancelBtn');
+
+const SOURCE_LABEL = { legacy: 'v1 迁移', upload: '照片', camera: '摄像头', video: '视频', cli: '批量导入' };
+const PERSON_PALETTE = ['#34d399', '#60a5fa', '#c084fc', '#f472b6', '#fbbf24', '#2dd4bf', '#fb923c', '#a3e635'];
+
+let state = null;
+let selectedId = Number(localStorage.getItem('localfaceAdminPerson')) || null;
+let currentFaces = [];
+let enrolling = false;
+let calibrating = false;
+let guardConfig = null;
+let camLeaseTimer = null;
+let stream = null;
+let videoFile = null;
+let videoUrl = '';
+
+// 与识别页共用的画布：把图片 / 视频帧 / 摄像头帧转成原始 RGBA
+const cap = document.createElement('canvas');
+const cctx = cap.getContext('2d', { willReadFrequently: true });
+
+function log(message, kind = '') {
+  const line = document.createElement('div');
+  const t = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  line.textContent = `[${t}] ${message}`;
+  if (kind) line.className = kind;
+  logEl.append(line);
+  while (logEl.children.length > 200) logEl.firstChild.remove();
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function api(path, { json, ...options } = {}) {
+  const init = { ...options };
+  if (json !== undefined) {
+    init.method = init.method || 'POST';
+    init.headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
+    init.body = JSON.stringify(json);
+  }
+  const res = await fetch(path, init);
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+const initialOf = name => (name || '?').trim().slice(0, 1).toUpperCase();
+
+function fillAvatar(el, person) {
+  el.replaceChildren();
+  if (!person.avatar) {
+    el.textContent = initialOf(person.name);
+    return;
+  }
+  const img = new Image();
+  img.alt = '';
+  img.src = person.avatar;
+  img.onerror = () => { el.replaceChildren(); el.textContent = initialOf(person.name); };
+  el.append(img);
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDuration(sec) {
+  if (!Number.isFinite(sec) || sec <= 0) return '时长未知';
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function selectedPerson() {
+  return state?.persons.find(p => p.id === selectedId) || null;
+}
+
+function refreshControls() {
+  const hasPerson = !!selectedId;
+  const busy = enrolling || calibrating;
+  addPersonBtn.disabled = busy;
+  editPersonBtn.disabled = busy || !hasPerson;
+  deletePersonBtn.disabled = busy || !hasPerson;
+  photoInput.disabled = busy || !hasPerson;
+  folderBtn.disabled = busy || !hasPerson;
+  camOpenBtn.disabled = busy || !!stream;
+  camCloseBtn.disabled = busy || !stream;
+  camShotBtn.disabled = busy || !stream || !hasPerson;
+  camBurstBtn.disabled = busy || !stream || !hasPerson;
+  camDevice.disabled = busy || !!stream;
+  videoExtractBtn.disabled = busy || !videoFile || !hasPerson;
+  frameCount.disabled = busy;
+  videoInput.disabled = busy;
+  refreshFacesBtn.disabled = busy || !hasPerson;
+  thEl.disabled = busy;
+  guardEnabled.disabled = busy;
+  guardPersonEnabled.disabled = busy || !hasPerson;
+  guardWarnCm.disabled = busy || !hasPerson;
+  guardCalibrateBtn.disabled = busy || !hasPerson || guardConfig?.enabled === false;
+}
+
+function renderPersons() {
+  personList.replaceChildren();
+  const persons = state?.persons || [];
+  noPersons.hidden = persons.length > 0;
+  for (const p of persons) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'person-row' + (p.id === selectedId ? ' active' : '');
+    row.title = p.note || p.name;
+
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    fillAvatar(av, p);
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = p.name;
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = `${p.faceCount} 张样本`;
+    info.append(name, sub);
+
+    row.append(av, info);
+    row.onclick = () => { if (!enrolling) selectPerson(p.id); };
+    personList.append(row);
+  }
+}
+
+function renderDetailHeader(person) {
+  fillAvatar(pAvatar, person);
+  pName.textContent = person.name;
+  pMeta.textContent = `${person.faceCount} 张人脸样本 · 更新于 ${fmtDateTime(person.updatedAt)}`;
+  pNote.textContent = person.note ? `备注：${person.note}` : '';
+  pNote.hidden = !person.note;
+}
+
+function renderFaces(faces) {
+  faceGrid.replaceChildren();
+  faceEmpty.hidden = faces.length > 0;
+  if (!faces.length) return;
+  const frag = document.createDocumentFragment();
+  for (const f of faces) {
+    const card = document.createElement('div');
+    card.className = 'face-card';
+    card.title = `${SOURCE_LABEL[f.source] || f.source}${f.file ? ' · ' + f.file : ''}\n${f.faceW ? `脸宽 ${f.faceW}px · ` : ''}检测分 ${f.detScore}`;
+
+    const shot = document.createElement('div');
+    shot.className = 'shot';
+    if (f.thumbUrl) {
+      const img = new Image();
+      img.loading = 'lazy';
+      img.alt = '人脸样本';
+      img.src = f.thumbUrl;
+      img.onerror = () => { img.remove(); shot.textContent = '缩略图丢失'; };
+      shot.append(img);
+    } else {
+      shot.textContent = '无缩略图';
+    }
+
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = SOURCE_LABEL[f.source] || f.source;
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del';
+    del.dataset.id = f.id;
+    del.title = '删除这张样本';
+    del.textContent = '×';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const left = document.createElement('span');
+    left.textContent = f.faceW ? `${f.faceW}px` : '旧样本';
+    const right = document.createElement('span');
+    right.textContent = fmtDateTime(f.createdAt).slice(0, 5);
+    meta.append(left, right);
+
+    card.append(shot, badge, del, meta);
+    frag.append(card);
+  }
+  faceGrid.append(frag);
+}
+
+async function loadFaces() {
+  const id = selectedId;
+  if (!id) return;
+  const r = await api(`/api/persons/${id}/faces`);
+  if (selectedId !== id) return;
+  currentFaces = r.faces;
+  faceCount.textContent = `${r.faces.length} 张`;
+  renderFaces(r.faces);
+  renderDetailHeader(r.person);
+  const p = state?.persons.find(x => x.id === id);
+  if (p) { p.faceCount = r.person.faceCount; p.avatar = r.person.avatar; p.updatedAt = r.person.updatedAt; }
+}
+
+let faceRefreshTimer = null;
+function scheduleFaceRefresh(immediate = false) {
+  clearTimeout(faceRefreshTimer);
+  faceRefreshTimer = setTimeout(() => { loadFaces().catch(() => {}); }, immediate ? 0 : 400);
+}
+
+async function selectPerson(id) {
+  if (enrolling) return;
+  selectedId = id;
+  localStorage.setItem('localfaceAdminPerson', String(id));
+  const person = state?.persons.find(p => p.id === id);
+  if (!person) return;
+  detail.hidden = false;
+  emptyState.hidden = true;
+  renderDetailHeader(person);
+  renderPersons();
+  renderGuard();
+  refreshControls();
+  faceGrid.replaceChildren();
+  faceEmpty.hidden = true;
+  faceCount.textContent = '…';
+  try {
+    await loadFaces();
+  } catch (e) {
+    log('读取样本失败：' + e.message, 'bad');
+  }
+}
+
+async function loadState(preferId) {
+  const s = await api('/api/state');
+  state = s;
+  libMeta.textContent = `${s.personCount} 人 · ${s.faceCount} 张样本 · ${s.model.split(' ').pop()}`;
+  libStats.textContent = `数据保存在本机：${s.storage}`;
+  libStats.title = s.storage;
+  if (document.activeElement !== thEl) {
+    thEl.value = Number(s.threshold).toFixed(2);
+    thv.textContent = Number(s.threshold).toFixed(2);
+  }
+  renderPersons();
+  let pid = preferId ?? selectedId;
+  if (!pid || !s.persons.some(p => p.id === pid)) pid = s.persons[0]?.id ?? null;
+  if (pid) {
+    selectedId = pid;
+    localStorage.setItem('localfaceAdminPerson', String(pid));
+    await selectPerson(pid);
+  } else {
+    selectedId = null;
+    detail.hidden = true;
+    emptyState.hidden = false;
+    refreshControls();
+  }
+}
+
+// ---------- 新增 / 编辑 / 删除人物 ----------
+let dlgMode = 'create';
+let dlgPersonId = null;
+
+function openPersonDialog(person) {
+  dlgMode = person ? 'edit' : 'create';
+  dlgPersonId = person?.id ?? null;
+  dlgTitle.textContent = person ? `编辑「${person.name}」` : '新增人物';
+  dlgName.value = person?.name || '';
+  dlgNote.value = person?.note || '';
+  dlgErr.textContent = '';
+  personDialog.showModal();
+  setTimeout(() => dlgName.focus(), 30);
+}
+
+addPersonBtn.onclick = () => openPersonDialog(null);
+editPersonBtn.onclick = () => { const p = selectedPerson(); if (p) openPersonDialog(p); };
+dlgCancelBtn.onclick = () => personDialog.close();
+
+personForm.onsubmit = async e => {
+  e.preventDefault();
+  const name = dlgName.value.trim();
+  if (!name) { dlgErr.textContent = '名字不能为空'; return; }
+  const note = dlgNote.value.trim();
+  try {
+    if (dlgMode === 'create') {
+      const r = await api('/api/persons', { json: { name, note } });
+      log(`已新增人物「${r.person.name}」`, 'ok');
+      personDialog.close();
+      await loadState(r.person.id);
+    } else {
+      const r = await api(`/api/persons/${dlgPersonId}`, { method: 'PATCH', json: { name, note } });
+      log(`已更新人物「${r.person.name}」`, 'ok');
+      personDialog.close();
+      await loadState(r.person.id);
+    }
+  } catch (err) {
+    dlgErr.textContent = err.message;
+  }
+};
+
+deletePersonBtn.onclick = async () => {
+  const p = selectedPerson();
+  if (!p) return;
+  if (!(await askConfirm(`删除「${p.name}」？会同时删除 ${p.faceCount} 张人脸样本和缩略图，不可恢复。`))) return;
+  try {
+    await api(`/api/persons/${p.id}`, { method: 'DELETE' });
+    log(`已删除人物「${p.name}」`, 'warn');
+    selectedId = null;
+    localStorage.removeItem('localfaceAdminPerson');
+    await loadState();
+  } catch (e) {
+    log('删除失败：' + e.message, 'bad');
+  }
+};
+
+// ---------- 照片 ----------
+function fileIsImage(file) {
+  return file.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|gif|heic|heif)$/i.test(file.name);
+}
+
+async function fileToRgba(file, maxSide = 1280) {
+  const bmp = await createImageBitmap(file);
+  try {
+    const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    cap.width = Math.max(1, Math.round(bmp.width * s));
+    cap.height = Math.max(1, Math.round(bmp.height * s));
+    cctx.drawImage(bmp, 0, 0, cap.width, cap.height);
+  } finally {
+    bmp.close();
+  }
+  const d = cctx.getImageData(0, 0, cap.width, cap.height);
+  return { buf: d.data.buffer, w: cap.width, h: cap.height };
+}
+
+async function enrollRgba(personId, { buf, w, h, source, file }) {
+  return api(`/api/persons/${personId}/faces?w=${w}&h=${h}&source=${encodeURIComponent(source)}&file=${encodeURIComponent(file || '')}`, {
+    method: 'POST',
+    body: buf,
+  });
+}
+
+async function enrollFiles(files) {
+  if (enrolling || !selectedId) return;
+  const imgs = [...files].filter(fileIsImage);
+  if (!imgs.length) { log('没有找到可用的图片文件', 'warn'); return; }
+  const personId = selectedId;
+  const personName = selectedPerson()?.name || '';
+  enrolling = true;
+  refreshControls();
+  let added = 0, skipped = 0, failed = 0;
+  log(`开始为「${personName}」处理 ${imgs.length} 张照片…`);
+  for (let i = 0; i < imgs.length; i++) {
+    const file = imgs[i];
+    try {
+      const rgba = await fileToRgba(file);
+      const r = await enrollRgba(personId, { ...rgba, source: 'upload', file: file.name });
+      if (r.added) {
+        added++;
+        log(`✓ [${i + 1}/${imgs.length}] ${file.name} · 脸 ${r.detected}px · 现有 ${r.total} 张`, 'ok');
+      } else {
+        skipped++;
+        log(`• [${i + 1}/${imgs.length}] ${file.name}：${r.reason}`, 'warn');
+      }
+    } catch (e) {
+      failed++;
+      log(`✗ [${i + 1}/${imgs.length}] ${file.name}：${e.message}`, 'bad');
+    }
+    if ((i + 1) % 4 === 0) scheduleFaceRefresh();
+  }
+  log(`照片处理完成：新增 ${added}，跳过 ${skipped}，失败 ${failed}`, added ? 'ok' : 'warn');
+  enrolling = false;
+  refreshControls();
+  scheduleFaceRefresh(true);
+  await loadState(personId).catch(() => {});
+}
+
+photoInput.onchange = e => { const files = e.target.files; enrollFiles(files); e.target.value = ''; };
+folderBtn.onclick = () => folderInput.click();
+folderInput.onchange = e => { const files = e.target.files; enrollFiles(files); e.target.value = ''; };
+
+for (const ev of ['dragenter', 'dragover']) {
+  photoDrop.addEventListener(ev, e => { e.preventDefault(); photoDrop.classList.add('over'); });
+}
+for (const ev of ['dragleave', 'drop']) {
+  photoDrop.addEventListener(ev, e => { e.preventDefault(); photoDrop.classList.remove('over'); });
+}
+photoDrop.addEventListener('drop', e => {
+  if (e.dataTransfer?.files?.length) enrollFiles(e.dataTransfer.files);
+});
+
+// ---------- 摄像头 ----------
+async function listCameras() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    const current = camDevice.value;
+    camDevice.replaceChildren();
+    cams.forEach((d, i) => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || `摄像头 ${i + 1}`;
+      camDevice.append(o);
+    });
+    if (current && cams.some(d => d.deviceId === current)) camDevice.value = current;
+  } catch {}
+}
+
+function claimAdminCamera() {
+  const beat = () => {
+    fetch('/api/camera/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner: 'admin' }),
+    }).catch(() => {});
+  };
+  beat();
+  clearInterval(camLeaseTimer);
+  camLeaseTimer = setInterval(beat, 2500);
+}
+
+function releaseAdminCamera() {
+  clearInterval(camLeaseTimer);
+  camLeaseTimer = null;
+  fetch('/api/camera/release', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner: 'admin' }),
+  }).catch(() => {});
+}
+
+async function openCamera() {
+  if (stream) return true;
+  try {
+    const deviceId = camDevice.value;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: deviceId ? { deviceId: { exact: deviceId } } : { width: 1280, height: 720 },
+      audio: false,
+    });
+    cam.srcObject = stream;
+    await cam.play();
+    camOff.hidden = true;
+    await listCameras();
+    claimAdminCamera();
+    log('摄像头已开启', 'ok');
+    return true;
+  } catch (e) {
+    log('打不开摄像头：' + e.message + '（请允许浏览器权限，或关掉占用摄像头的软件）', 'bad');
+    return false;
+  } finally {
+    refreshControls();
+  }
+}
+
+camOpenBtn.onclick = () => { openCamera(); };
+
+function closeCamera() {
+  if (!stream) return;
+  stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  cam.srcObject = null;
+  camOff.hidden = false;
+  releaseAdminCamera();
+  refreshControls();
+}
+
+camCloseBtn.onclick = () => { closeCamera(); log('摄像头已关闭'); };
+
+function grabCamera() {
+  const vw = cam.videoWidth, vh = cam.videoHeight;
+  if (!vw || !vh) throw new Error('摄像头画面还没准备好，请稍等一秒');
+  const s = Math.min(1, 960 / Math.max(vw, vh));
+  cap.width = Math.round(vw * s);
+  cap.height = Math.round(vh * s);
+  cctx.drawImage(cam, 0, 0, cap.width, cap.height);
+  const d = cctx.getImageData(0, 0, cap.width, cap.height);
+  return { buf: d.data.buffer, w: cap.width, h: cap.height };
+}
+
+async function cameraEnroll(label) {
+  const personId = selectedId;
+  const rgba = grabCamera();
+  const r = await enrollRgba(personId, {
+    ...rgba,
+    source: 'camera',
+    file: `摄像头 ${new Date().toLocaleString('zh-CN', { hour12: false })}`,
+  });
+  if (r.added) log(`✓ ${label} · 脸 ${r.detected}px · 现有 ${r.total} 张`, 'ok');
+  else log(`• ${label}：${r.reason}`, 'warn');
+  return r;
+}
+
+camShotBtn.onclick = async () => {
+  if (enrolling || !stream) return;
+  enrolling = true;
+  refreshControls();
+  try { await cameraEnroll('当前画面'); }
+  catch (e) { log('录入失败：' + e.message, 'bad'); }
+  enrolling = false;
+  refreshControls();
+  scheduleFaceRefresh(true);
+  await loadState().catch(() => {});
+};
+
+camBurstBtn.onclick = async () => {
+  if (enrolling || !stream) return;
+  enrolling = true;
+  refreshControls();
+  let ok = 0;
+  log('连拍开始：请稍微换几个角度…');
+  for (let i = 1; i <= 8; i++) {
+    try {
+      const r = await cameraEnroll(`连拍 ${i}/8`);
+      if (r.added) ok++;
+    } catch (e) {
+      log(`✗ 连拍 ${i}/8：${e.message}`, 'bad');
+    }
+    scheduleFaceRefresh();
+    if (i < 8) await new Promise(r => setTimeout(r, 350));
+  }
+  log(`连拍结束：新增 ${ok} 张`, ok ? 'ok' : 'warn');
+  enrolling = false;
+  refreshControls();
+  await loadState().catch(() => {});
+};
+
+// ---------- 视频 ----------
+videoInput.onchange = () => {
+  const file = videoInput.files?.[0];
+  if (!file) return;
+  if (videoUrl) URL.revokeObjectURL(videoUrl);
+  videoFile = file;
+  videoUrl = URL.createObjectURL(file);
+  videoPreview.src = videoUrl;
+  videoPreview.hidden = false;
+  videoMeta.textContent = '读取视频信息…';
+  videoPreview.onloadedmetadata = () => {
+    videoMeta.textContent = `${file.name} · ${fmtDuration(videoPreview.duration)} · ${videoPreview.videoWidth}×${videoPreview.videoHeight}`;
+    refreshControls();
+  };
+  videoPreview.onerror = () => {
+    videoMeta.textContent = '这个视频浏览器无法解码';
+    videoFile = null;
+    refreshControls();
+  };
+  refreshControls();
+  videoPreview.load();
+};
+
+function seekVideo(video, t) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let finishTimer = null;
+    let poll = null;
+    const started = performance.now();
+    const finish = err => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      clearTimeout(finishTimer);
+      video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('error', onError);
+      if (err) reject(err); else resolve();
+    };
+    const onSeeked = () => { clearTimeout(finishTimer); finishTimer = setTimeout(() => finish(), 40); };
+    const onError = () => finish(new Error('视频跳转失败'));
+    video.addEventListener('seeked', onSeeked);
+    video.addEventListener('error', onError);
+    if (Math.abs(video.currentTime - t) < 1e-3 && video.readyState >= 2) {
+      setTimeout(() => finish(), 40);
+      return;
+    }
+    video.currentTime = t;
+    // 有些浏览器在后台标签页不派发 seeked，用轮询兜底
+    poll = setInterval(() => {
+      if (settled) return;
+      if (Math.abs(video.currentTime - t) < 0.08 && video.readyState >= 2) {
+        clearInterval(poll);
+        finishTimer = setTimeout(() => finish(), 120);
+      } else if (performance.now() - started > 10000) {
+        finish(new Error('视频跳转超时'));
+      }
+    }, 120);
+  });
+}
+
+function grabVideoFrame(video) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) throw new Error('视频画面还没准备好');
+  const s = Math.min(1, 1280 / Math.max(vw, vh));
+  cap.width = Math.round(vw * s);
+  cap.height = Math.round(vh * s);
+  cctx.drawImage(video, 0, 0, cap.width, cap.height);
+  const d = cctx.getImageData(0, 0, cap.width, cap.height);
+  return { buf: d.data.buffer, w: cap.width, h: cap.height };
+}
+
+videoExtractBtn.onclick = async () => {
+  if (enrolling || !videoFile || !selectedId) return;
+  const personId = selectedId;
+  const fileName = videoFile.name;
+  const n = Number(frameCount.value);
+  const duration = videoPreview.duration;
+  if (!Number.isFinite(duration) || duration <= 0) { log('视频还没有加载完，稍等一下再试', 'warn'); return; }
+
+  enrolling = true;
+  refreshControls();
+  videoProgress.classList.add('show');
+  videoProgress.firstElementChild.style.width = '0%';
+  let added = 0, skipped = 0, failed = 0;
+  log(`开始从「${fileName}」抽取 ${n} 帧（时长 ${fmtDuration(duration)}）…`);
+  videoPreview.pause();
+
+  for (let i = 0; i < n; i++) {
+    const t = Math.min(Math.max(0.04, duration * (i + 0.5) / n), Math.max(0.04, duration - 0.05));
+    try {
+      await seekVideo(videoPreview, t);
+      const rgba = grabVideoFrame(videoPreview);
+      const r = await enrollRgba(personId, { ...rgba, source: 'video', file: fileName });
+      if (r.added) {
+        added++;
+        log(`✓ 第 ${i + 1}/${n} 帧（${t.toFixed(1)}s）· 脸 ${r.detected}px`, 'ok');
+      } else {
+        skipped++;
+        log(`• 第 ${i + 1}/${n} 帧（${t.toFixed(1)}s）：${r.reason}`, 'warn');
+      }
+    } catch (e) {
+      failed++;
+      log(`✗ 第 ${i + 1}/${n} 帧：${e.message}`, 'bad');
+    }
+    videoProgress.firstElementChild.style.width = `${Math.round((i + 1) / n * 100)}%`;
+    if ((i + 1) % 3 === 0) scheduleFaceRefresh();
+  }
+
+  log(`视频处理完成：新增 ${added}，跳过 ${skipped}，失败 ${failed}`, added ? 'ok' : 'warn');
+  videoProgress.firstElementChild.style.width = '100%';
+  setTimeout(() => videoProgress.classList.remove('show'), 900);
+  enrolling = false;
+  refreshControls();
+  await loadState(personId).catch(() => {});
+};
+
+// ---------- 样本删除 / 刷新 ----------
+faceGrid.onclick = async e => {
+  const btn = e.target.closest('.del');
+  if (!btn || enrolling) return;
+  if (!(await askConfirm('删除这张人脸样本？'))) return;
+  try {
+    await api(`/api/faces/${btn.dataset.id}`, { method: 'DELETE' });
+    log('已删除一张人脸样本', 'warn');
+    await loadFaces();
+    await loadState().catch(() => {});
+  } catch (err) {
+    log('删除失败：' + err.message, 'bad');
+  }
+};
+
+refreshFacesBtn.onclick = () => loadFaces().catch(e => log('刷新失败：' + e.message, 'bad'));
+
+// ---------- 阈值 ----------
+thEl.addEventListener('input', () => { thv.textContent = Number(thEl.value).toFixed(2); });
+thEl.addEventListener('change', async () => {
+  try {
+    const r = await api('/api/settings', { method: 'PUT', json: { threshold: Number(thEl.value) } });
+    thEl.value = Number(r.threshold).toFixed(2);
+    thv.textContent = Number(r.threshold).toFixed(2);
+    log(`识别阈值已设为 ${Number(r.threshold).toFixed(2)}`, 'ok');
+  } catch (e) {
+    log('保存阈值失败：' + e.message, 'bad');
+  }
+});
+
+// ---------- 距离提醒 ----------
+function renderGuard() {
+  const cfg = guardConfig;
+  if (!cfg) return;
+  const person = selectedPerson();
+  const profile = person ? cfg.profiles.find(p => p.personId === person.id) : null;
+  const busy = calibrating || enrolling;
+
+  if (document.activeElement !== guardEnabled) guardEnabled.checked = !!cfg.enabled;
+  guardPersonName.textContent = person?.name || '此人';
+  guardPersonEnabled.disabled = busy || !person;
+  guardWarnCm.disabled = busy || !person;
+  guardCalibrateBtn.disabled = busy || !person || !cfg.enabled;
+
+  if (profile) {
+    if (document.activeElement !== guardPersonEnabled) guardPersonEnabled.checked = !!profile.enabled;
+    if (document.activeElement !== guardWarnCm) guardWarnCm.value = String(Math.round(profile.warnCm));
+    if (profile.enabled && profile.calibrated) {
+      guardPersonState.textContent = '已启用';
+      guardPersonState.className = 'pill ok';
+    } else if (profile.calibrated) {
+      guardPersonState.textContent = '已校准 · 未启用';
+      guardPersonState.className = 'pill';
+    } else {
+      guardPersonState.textContent = '未校准';
+      guardPersonState.className = 'pill warn';
+    }
+    guardCalibInfo.textContent = profile.calibrated
+      ? `校准 ${Math.round(profile.refCm)}cm 处脸宽 ${(profile.refRatio * 100).toFixed(1)}% · 触发线 ${(profile.threshold * 100).toFixed(1)}%`
+      : '还没有校准';
+    guardCalibHint.textContent = profile.calibrated
+      ? `离屏幕 ${Math.round(profile.warnCm)}cm 以内会弹出警告；修改距离后立即生效。`
+      : '校准：让孩子站在「提醒距离」处、正对屏幕，点开始并保持 3 秒。';
+  } else {
+    guardPersonEnabled.checked = false;
+    guardCalibInfo.textContent = '';
+    guardCalibHint.textContent = '';
+  }
+
+  const st = cfg.status || {};
+  let text = '护栏页未运行：桌面应用启动后会自动运行';
+  let tone = '';
+  if (!cfg.enabled) {
+    text = '总开关已关闭，靠近屏幕不会弹出警告';
+  } else if (!cfg.activeCount) {
+    text = '还没有「已启用 + 已校准」的人，护栏不会开摄像头';
+  } else if (st.live) {
+    const cam = st.camera === 'on'
+      ? `摄像头 ${st.fps || 0}fps`
+      : st.camera === 'waiting'
+        ? '摄像头正在给后台录入让路'
+        : st.camera === 'error'
+          ? `摄像头错误：${st.error || '未知'}`
+          : '摄像头未启动';
+    const who = st.personName ? `认出「${st.personName}」` : st.seen ? '画面里有人脸' : '画面里没有人';
+    const ratio = st.ratio > 0 ? ` · 脸宽 ${(st.ratio * 100).toFixed(1)}%` : '';
+    text = `护栏运行中 · ${cam} · ${who}${ratio}`;
+    if (st.camera === 'error') tone = 'bad';
+  }
+  guardStatus.textContent = text;
+  guardStatus.className = 'guard-status' + (tone ? ' ' + tone : '');
+}
+
+async function loadGuard() {
+  guardConfig = await api('/api/guard');
+  renderGuard();
+}
+
+async function saveGuardProfile(patch) {
+  const person = selectedPerson();
+  if (!person) return;
+  try {
+    const r = await api(`/api/guard/persons/${person.id}`, { method: 'PUT', json: patch });
+    guardConfig = { ...r, status: guardConfig?.status };
+    renderGuard();
+    log(`已更新「${person.name}」的距离提醒设置`, 'ok');
+    loadGuard().catch(() => {});
+  } catch (e) {
+    log('保存距离提醒失败：' + e.message, 'bad');
+    loadGuard().catch(() => {});
+  }
+}
+
+guardEnabled.addEventListener('change', async () => {
+  try {
+    const r = await api('/api/guard', { method: 'PUT', json: { enabled: guardEnabled.checked } });
+    guardConfig = { ...r, status: guardConfig?.status };
+    renderGuard();
+    log(guardEnabled.checked ? '已启用距离提醒' : '已关闭距离提醒', guardEnabled.checked ? 'ok' : 'warn');
+    loadGuard().catch(() => {});
+  } catch (e) {
+    log('保存距离提醒开关失败：' + e.message, 'bad');
+    loadGuard().catch(() => {});
+  }
+});
+
+guardPersonEnabled.addEventListener('change', () => {
+  saveGuardProfile({ enabled: guardPersonEnabled.checked });
+});
+
+guardWarnCm.addEventListener('change', () => {
+  const cm = Number(guardWarnCm.value);
+  if (!Number.isFinite(cm) || cm < 25 || cm > 150) {
+    log('提醒距离需要在 25～150cm 之间', 'warn');
+    renderGuard();
+    return;
+  }
+  saveGuardProfile({ warnCm: cm });
+});
+
+async function sampleGuardRatio() {
+  const rgba = grabCamera();
+  const res = await fetch(`/scan?w=${rgba.w}&h=${rgba.h}&detThreshold=0.45&identity=0`, {
+    method: 'POST',
+    body: rgba.buf,
+  });
+  if (!res.ok) throw new Error(`识别服务返回 ${res.status}`);
+  const data = await res.json();
+  const best = (data.faces || []).slice().sort((a, b) => b.faceW - a.faceW)[0];
+  return best ? best.faceW / rgba.w : 0;
+}
+
+async function calibrateGuard() {
+  const person = selectedPerson();
+  if (!person || calibrating) return;
+  const cm = Number(guardWarnCm.value);
+  if (!Number.isFinite(cm) || cm < 25 || cm > 150) {
+    log('提醒距离需要在 25～150cm 之间', 'warn');
+    return;
+  }
+  const openedHere = !stream;
+  if (openedHere && !(await openCamera())) {
+    log('校准需要摄像头', 'bad');
+    return;
+  }
+
+  calibrating = true;
+  refreshControls();
+  guardCalibProgress.classList.add('show');
+  guardCalibProgress.firstElementChild.style.width = '0%';
+  const samples = [];
+  try {
+    for (let i = 0; i < 12; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      try {
+        const ratio = await sampleGuardRatio();
+        if (ratio > 0.01) samples.push(ratio);
+      } catch (e) {
+        log('校准取样失败：' + e.message, 'bad');
+      }
+      guardCalibProgress.firstElementChild.style.width = `${Math.round((i + 1) / 12 * 100)}%`;
+      guardCalibHint.textContent = `校准中… 请站在 ${cm}cm 处保持不动（有效画面 ${samples.length} 个）`;
+    }
+    if (samples.length < 4) throw new Error('没有稳定检测到人脸，请正对镜头、光线充足后再试');
+    samples.sort((a, b) => a - b);
+    const ratio = samples[samples.length >> 1];
+    const r = await api(`/api/guard/persons/${person.id}/calibrate`, {
+      json: { ratio, cm, warnCm: cm, enabled: true },
+    });
+    guardConfig = { ...r, status: guardConfig?.status };
+    renderGuard();
+    log(`已校准「${person.name}」：${cm}cm 处脸宽比例 ${(ratio * 100).toFixed(1)}%`, 'ok');
+    guardCalibHint.textContent = '校准完成。离屏幕太近时就会弹出警告。';
+  } catch (e) {
+    log('校准失败：' + e.message, 'bad');
+    guardCalibHint.textContent = '校准失败：' + e.message;
+  } finally {
+    calibrating = false;
+    refreshControls();
+    guardCalibProgress.firstElementChild.style.width = '100%';
+    setTimeout(() => guardCalibProgress.classList.remove('show'), 900);
+    if (openedHere) closeCamera();
+    loadGuard().catch(() => {});
+  }
+}
+
+guardCalibrateBtn.onclick = () => { calibrateGuard(); };
+
+// ---------- 启动 ----------
+window.addEventListener('beforeunload', () => {
+  releaseAdminCamera();
+  stream?.getTracks().forEach(t => t.stop());
+});
+
+// 主窗口隐藏 / 切到后台时把摄像头让给距离提醒，避免护栏一直拿不到摄像头
+// ---------- 图片标注 ----------
+const markInput = $('markInput');
+const markBtn = $('markBtn');
+const markRetryBtn = $('markRetryBtn');
+const markStage = $('markStage');
+const markCanvas = $('markCanvas');
+const markStat = $('markStat');
+const markCtx = markCanvas.getContext('2d');
+const MARK_MAX = 1600;
+const MARK_PALETTE = ['#34d399', '#60a5fa', '#c084fc', '#f472b6', '#fbbf24', '#2dd4bf', '#fb923c', '#a3e635'];
+let markBitmap = null;
+
+function markColor(personId) {
+  return MARK_PALETTE[(Number(personId) - 1 + MARK_PALETTE.length) % MARK_PALETTE.length];
+}
+
+function drawMarkBoxes(faces) {
+  markCtx.drawImage(markBitmap, 0, 0, markCanvas.width, markCanvas.height);
+  markCtx.font = '600 14px -apple-system, PingFang SC, sans-serif';
+  markCtx.lineWidth = 2.5;
+  for (const f of faces) {
+    const known = f.known && f.personId;
+    const color = known ? markColor(f.personId) : '#fbbf24';
+    markCtx.strokeStyle = color;
+    markCtx.strokeRect(f.box.x, f.box.y, f.box.width, f.box.height);
+    let label;
+    if (known) label = `${f.personName || '已登记'} ${Math.round(f.sim * 100)}%`;
+    else if (f.sim !== null) label = `陌生人 ${Math.round(f.sim * 100)}%`;
+    else label = '人脸';
+    const tw = markCtx.measureText(label).width;
+    const ly = Math.max(0, f.box.y - 22);
+    markCtx.fillStyle = color;
+    markCtx.fillRect(f.box.x, ly, tw + 14, 22);
+    markCtx.fillStyle = known ? '#06120d' : '#241a02';
+    markCtx.fillText(label, f.box.x + 7, ly + 16);
+  }
+}
+
+async function markImage() {
+  markBtn.disabled = true;
+  markRetryBtn.hidden = true;
+  markStat.textContent = '识别中…';
+  try {
+    markCtx.drawImage(markBitmap, 0, 0, markCanvas.width, markCanvas.height);
+    const img = markCtx.getImageData(0, 0, markCanvas.width, markCanvas.height);
+    const res = await fetch(`/scan?w=${markCanvas.width}&h=${markCanvas.height}&detThreshold=0.45`, {
+      method: 'POST',
+      body: img.data.buffer,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    drawMarkBoxes(data.faces);
+    const knownFaces = data.faces.filter(f => f.known && f.personId);
+    const names = [...new Set(knownFaces.map(f => f.personName || `人物${f.personId}`))];
+    markStat.textContent = data.faces.length
+      ? `共 ${data.faces.length} 人 · ${names.length ? '认出：' + names.join('、') : '没有已登记的人'}`
+      : '没有检测到人脸';
+    markRetryBtn.hidden = false;
+  } catch (e) {
+    markStat.textContent = '标注失败：' + e.message;
+    log('图片标注失败：' + e.message, 'bad');
+  } finally {
+    markBtn.disabled = !markBitmap;
+  }
+}
+
+markInput.onchange = async () => {
+  const file = markInput.files?.[0];
+  if (!file) return;
+  markBitmap = null;
+  markBtn.disabled = true;
+  markStat.textContent = `读取 ${file.name}…`;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MARK_MAX / Math.max(bitmap.width, bitmap.height));
+    markCanvas.width = Math.round(bitmap.width * scale);
+    markCanvas.height = Math.round(bitmap.height * scale);
+    markCtx.drawImage(bitmap, 0, 0, markCanvas.width, markCanvas.height);
+    markBitmap = bitmap;
+    markStage.hidden = false;
+    markStat.textContent = `${bitmap.width}×${bitmap.height} · 点「标出人物」开始识别`;
+    markBtn.disabled = false;
+    markImage();
+  } catch (e) {
+    markStat.textContent = '图片读取失败：' + e.message;
+  }
+};
+
+markBtn.onclick = () => { if (markBitmap) markImage(); };
+markRetryBtn.onclick = () => { if (markBitmap) markImage(); };
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && stream && !enrolling && !calibrating) {
+    closeCamera();
+    log('窗口切到后台，摄像头已让给距离提醒');
+  }
+});
+
+(async () => {
+  await listCameras().catch(() => {});
+  try {
+    await loadState();
+    log('管理后台已就绪', 'ok');
+  } catch (e) {
+    emptyState.innerHTML = '';
+    const big = document.createElement('div');
+    big.className = 'big';
+    big.textContent = '!';
+    const msg = document.createElement('div');
+    msg.textContent = '连接本机服务失败：' + e.message;
+    emptyState.append(big, msg);
+    log('连接失败：' + e.message, 'bad');
+  }
+  loadGuard().catch(e => log('距离提醒设置读取失败：' + e.message, 'bad'));
+  setInterval(() => {
+    if (document.visibilityState === 'visible') loadGuard().catch(() => {});
+  }, 3000);
+})();
+</script>
+</body>
+</html>

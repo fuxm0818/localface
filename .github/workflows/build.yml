@@ -1,0 +1,65 @@
+# 每次 push 到 main 自动打包 macOS 应用；打 v* 标签时额外发布 GitHub Release
+# 产物（.app 压缩包 / .dmg）在仓库 Actions 页面的 Artifacts 里下载
+name: 打包桌面版
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: macOS（Apple Silicon）
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # postinstall 会自动下载人脸模型（约 170 MB）
+      - name: 安装依赖与模型
+        run: npm install
+
+      - name: 打包 .app 和 .dmg
+        run: npm run desktop:build
+
+      # GitHub 会丢弃资源文件名里的中文，先复制成 ASCII 名再上传
+      - name: 整理产物文件名
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          BUNDLE=src-tauri/target/release/bundle
+          cp "$BUNDLE"/dmg/*.dmg "$BUNDLE/LocalFace_${VERSION}_aarch64.dmg"
+          (cd "$BUNDLE/macos" && zip -qry "../LocalFace_${VERSION}_aarch64.app.zip" *.app)
+
+      - uses: actions/upload-artifact@v4
+        name: 上传构建产物
+        with:
+          name: LocalFace-macos-arm64
+          path: |
+            src-tauri/target/release/bundle/LocalFace_*.app.zip
+            src-tauri/target/release/bundle/LocalFace_*.dmg
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 发布 Release（仅 v* 标签触发）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/LocalFace_*.app.zip
+            src-tauri/target/release/bundle/LocalFace_*.dmg
+          generate_release_notes: true
