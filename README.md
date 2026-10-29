@@ -709,7 +709,20 @@ Rust 写的 Tauri 2 壳只负责进程生命周期和窗口，识别、数据库
 需要：macOS + Xcode Command Line Tools（`xcode-select --install`）+ Rust（`rustup`）。
 仓库里的 `src-tauri/.cargo/config.toml` 配了 [rsproxy](https://rsproxy.cn) 镜像加速 crates 下载；在海外网络可以删掉这个文件，改用官方源。
 
-**不想自己装环境？** 仓库配了 GitHub Actions（`.github/workflows/build.yml`）：每次 push 到 main 会自动在云端打包 Apple Silicon 版 `.app` / `.dmg`，在仓库的 [Actions](https://github.com/fuxm0818/localface/actions) 页面点进最新一次运行，Artifacts 里下载即可；打 `v*` 标签（`git tag v1.0.0 && git push --tags`）还会自动发布到 Releases。云端产物未签名，首次打开需右键 →「打开」。
+**不想自己装环境？** 仓库配了 GitHub Actions（`.github/workflows/build.yml`）：每次 push 到 main 会自动在云端打包 Apple Silicon 版 `.app` / `.dmg`，在仓库的 [Actions](https://github.com/fuxm0818/localface/actions) 页面点进最新一次运行，Artifacts 里下载即可；打 `v*` 标签（`git tag v1.0.1 && git push --tags`）还会自动发布到 Releases。云端产物使用 ad-hoc 签名（没有 Apple 付费开发者签名），首次打开会被 Gatekeeper 拦一次，按下面的步骤放行即可。
+
+### 从 Releases 下载安装
+
+1. 下载 `LocalFace_<版本>_aarch64.dmg`（或 `.app.zip`），把 `LocalFace.app` 拖进「应用程序」文件夹；
+2. 首次打开不要双击：在 Finder 里**右键 →「打开」**，弹窗里再点一次「打开」。如果只看到「移到废纸篓 / 完成」，去 **系统设置 → 隐私与安全性**，在底部点「仍要打开」；
+3. 如果仍提示「“LocalFace”已损坏，无法打开」：说明拿到的是早期未签名的包，终端执行
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/LocalFace.app
+   open /Applications/LocalFace.app
+   ```
+
+这是 macOS 对非 App Store、非付费开发者账号应用的正常拦截，放行一次后不再提示；应用完全在本机运行，不会上传数据。
 
 ```bash
 npm install
@@ -720,7 +733,7 @@ npm run desktop:build     # 首次编译 Rust，约 3～10 分钟
 
 ```
 src-tauri/target/release/bundle/macos/LocalFace.app              ~371 MB
-src-tauri/target/release/bundle/dmg/LocalFace_1.0.0_aarch64.dmg  ~218 MB
+src-tauri/target/release/bundle/dmg/LocalFace_1.0.1_aarch64.dmg  ~218 MB
 ```
 
 双击 `.app` 即可使用，不需要终端，也不需要在目标机器上安装 Node。

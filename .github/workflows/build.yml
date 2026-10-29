@@ -37,13 +37,22 @@ jobs:
       - name: 打包 .app 和 .dmg
         run: npm run desktop:build
 
-      # GitHub 会丢弃资源文件名里的中文，先复制成 ASCII 名再上传
+      # 未签名的 .app 从网上下载后会被 Gatekeeper 判定为「已损坏」，这里必须校验 ad-hoc 签名没有丢
+      # sidecar 是打包进去的 Node 运行时，重签时必须保留 JIT 权限，否则启动即 OOM
+      - name: 校验 .app 签名与 entitlements
+        run: |
+          APP=src-tauri/target/release/bundle/macos/LocalFace.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -q 'Signature=adhoc'
+          codesign -d --entitlements :- "$APP/Contents/MacOS/localface-server" 2>/dev/null | grep -q 'allow-jit'
+
+      # GitHub 会丢弃资源文件名里的中文，先复制成 ASCII 名再上传；ditto 能保留签名和扩展属性
       - name: 整理产物文件名
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           BUNDLE=src-tauri/target/release/bundle
           cp "$BUNDLE"/dmg/*.dmg "$BUNDLE/LocalFace_${VERSION}_aarch64.dmg"
-          (cd "$BUNDLE/macos" && zip -qry "../LocalFace_${VERSION}_aarch64.app.zip" *.app)
+          ditto -c -k --keepParent "$BUNDLE/macos/LocalFace.app" "$BUNDLE/LocalFace_${VERSION}_aarch64.app.zip"
 
       - uses: actions/upload-artifact@v4
         name: 上传构建产物

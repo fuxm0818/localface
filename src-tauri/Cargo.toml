@@ -1,6 +1,6 @@
 [package]
 name = "localface"
-version = "1.0.0"
+version = "1.0.1"
 description = "LocalFace：本地多人物人脸识别桌面应用，画面不出本机"
 license = "MIT"
 repository = "https://github.com/fuxm0818/localface"
